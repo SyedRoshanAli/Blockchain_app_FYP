@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import "./Profile.css";
 import UserAuth from "../UserAuth"; // Blockchain smart contract instance
+import CreatePost from "../components/posts/create";
 
 function ProfilePage() {
   const [userData, setUserData] = useState(null);
@@ -16,7 +17,9 @@ function ProfilePage() {
 
       try {
         if (!window.ethereum) {
-          setErrorMessage("MetaMask is not installed. Please install MetaMask.");
+          setErrorMessage(
+            "MetaMask is not installed. Please install MetaMask."
+          );
           return;
         }
 
@@ -32,7 +35,9 @@ function ProfilePage() {
           throw new Error("User data not found on blockchain.");
         }
 
-        const response = await fetch(`http://127.0.0.1:8082/ipfs/${userIpfsHash}`);
+        const response = await fetch(
+          `http://127.0.0.1:8082/ipfs/${userIpfsHash}`
+        );
         if (!response.ok) {
           throw new Error("Failed to fetch user data from IPFS.");
         }
@@ -125,6 +130,7 @@ function ProfilePage() {
           {activeTab === "posts" && (
             <section>
               <h3>Posts</h3>
+              <CreatePost />
               <div className="post">Post 1: This is a sample post.</div>
               <div className="post">Post 2: Another sample post.</div>
             </section>

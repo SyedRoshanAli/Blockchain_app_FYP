@@ -5,6 +5,7 @@
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
   padding: 20px;
   margin-bottom: 20px;
+  max-width: 500px;
 }
 
 /* Text Area */
@@ -72,11 +73,13 @@
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-direction: column;
+  justify-content: start;
 }
 
 .preview-img {
-  width: 80px;
-  height: 80px;
+  width: 400px;
+  height: 400px;
   border-radius: 6px;
   object-fit: cover;
   border: 1px solid #ddd;

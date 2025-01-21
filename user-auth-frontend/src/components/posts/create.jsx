@@ -4,6 +4,7 @@ import "./create.css";
 const CreatePost = ({ onPostCreate }) => {
   const [postContent, setPostContent] = useState("");
   const [image, setImage] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
 
   const handlePostContentChange = (e) => {
     setPostContent(e.target.value);
@@ -13,7 +14,14 @@ const CreatePost = ({ onPostCreate }) => {
     const file = e.target.files[0];
     if (file) {
       setImage(file);
+      setImagePreview(URL.createObjectURL(file));
     }
+  };
+
+  const handleRemoveImage = () => {
+    setImage(null);
+    setImagePreview(null);
+    document.querySelector(".file-input").value = "";
   };
 
   const handleSubmit = (e) => {
@@ -23,13 +31,12 @@ const CreatePost = ({ onPostCreate }) => {
       return;
     }
 
-    // Pass the post data back to the parent or perform an API call
     const newPost = { content: postContent, image };
     onPostCreate(newPost);
 
-    // Reset form
     setPostContent("");
     setImage(null);
+    setImagePreview(null);
   };
 
   return (
@@ -42,17 +49,13 @@ const CreatePost = ({ onPostCreate }) => {
           onChange={handlePostContentChange}
         />
 
-        {image && (
+        {imagePreview && (
           <div className="image-preview">
-            <img
-              src={URL.createObjectURL(image)}
-              alt="Preview"
-              className="preview-img"
-            />
+            <img src={imagePreview} alt="Preview" className="preview-img" />
             <button
               type="button"
               className="remove-image-button"
-              onClick={() => setImage(null)}
+              onClick={handleRemoveImage}
             >
               Remove
             </button>
