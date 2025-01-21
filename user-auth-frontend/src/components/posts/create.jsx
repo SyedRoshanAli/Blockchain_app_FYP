@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import "./post.css";
+import "./create.css";
 
 const CreatePost = ({ onPostCreate }) => {
   const [postContent, setPostContent] = useState("");

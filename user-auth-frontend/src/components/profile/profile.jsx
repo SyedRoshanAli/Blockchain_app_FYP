@@ -1,9 +1,35 @@
 import React, { useState } from "react";
 import "./profile.css";
-import CreatePost from "../posts/post";
+import CreatePost from "../posts/create";
+import Post from "../posts/posts";
 
 const ProfilePage = () => {
   const [activeTab, setActiveTab] = useState("posts");
+
+  const posts = [
+    {
+      id: 1,
+      title: "Post Title 1",
+      content: "This is a sample post content.",
+      likes: 10,
+      comments: ["Nice post!", "Great work!"],
+    },
+    {
+      id: 2,
+      title: "Post Title 2",
+      content: "This is another sample post content.",
+      likes: 5,
+      comments: [],
+    },
+  ];
+
+  const handleEdit = (postId) => {
+    console.log("Edit Post ID:", postId);
+  };
+
+  const handleDelete = (postId) => {
+    console.log("Delete Post ID:", postId);
+  };
 
   return (
     <div className="profile-container">
@@ -72,17 +98,17 @@ const ProfilePage = () => {
           {activeTab === "posts" && (
             <div>
               <CreatePost />
-              <h2 className="tab-title">Recent Posts</h2>
-              <div className="post">
-                <h3 className="post-title">Post Title 1</h3>
-                <p className="post-content">This is a sample post content.</p>
-              </div>
-              <div className="post">
-                <h3 className="post-title">Post Title 2</h3>
-                <p className="post-content">
-                  This is another sample post content.
-                </p>
-              </div>
+
+              <h2>Recent Posts</h2>
+              {posts.map((post) => (
+                <Post
+                  key={post.id}
+                  post={post}
+                  isOwner={post.id === 1} // Assume the user owns post with ID 1
+                  onEdit={handleEdit}
+                  onDelete={handleDelete}
+                />
+              ))}
             </div>
           )}
           {activeTab === "followers" && (
