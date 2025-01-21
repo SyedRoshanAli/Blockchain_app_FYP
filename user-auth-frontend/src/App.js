@@ -1,10 +1,10 @@
-import React, { useEffect, useState } from "react";
-import Web3 from "web3";
-import LandingPage from "./LandingPage"; // Landing Page Component
-import Register from "./Register"; // Register Page Component
-import Login from "./Login.js"; // Login Page Component
-import ProfilePage from "./components/profile/profile.jsx";
-import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
+import React, { useEffect, useState } from 'react';
+import Web3 from 'web3';
+import LandingPage from './LandingPage'; // Landing Page Component
+import Register from './Register'; // Register Page Component
+import Login from './Login.js'; // Login Page Component
+import Profile from './Profile/Profile.js'; // Profile Page Component
+import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
 
 function App() {
   const [account, setAccount] = useState(""); // Store the connected MetaMask account
@@ -61,30 +61,20 @@ function App() {
     loadWeb3();
   }, []);
 
-  return (
-    <Router>
-      <div className="App">
-        {/* Display error or success messages */}
-        {message && (
-          <p style={{ color: "red", textAlign: "center" }}>{message}</p>
-        )}
-
-        {/* Application Routes */}
-        <Routes>
-          {/* Landing Page (Default) */}
-          <Route path="/" element={<LandingPage account={account} />} />
-          {/* Register Page */}
-          <Route
-            path="/register"
-            element={<Register account={account} web3={web3} />}
-          />
-          {/* Login Page */}
-          <Route path="/login" element={<Login account={account} />} />
-          <Route path="/profile" element={<ProfilePage />} />
-        </Routes>
-      </div>
-    </Router>
-  );
+                {/* Application Routes */}
+                <Routes>
+                    {/* Landing Page (Default) */}
+                    <Route path="/" element={<LandingPage account={account} />} />
+                    {/* Register Page */}
+                    <Route path="/register" element={<Register account={account} web3={web3} />} />
+                    {/* Login Page */}
+                    <Route path="/login" element={<Login account={account} />} />
+                    {/* Profile Page */}
+                    <Route path="/profile" element={<Profile account={account} web3={web3} />} />
+                </Routes>
+            </div>
+        </Router>
+    );
 }
 
 export default App;

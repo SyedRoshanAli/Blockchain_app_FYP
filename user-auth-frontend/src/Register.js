@@ -9,8 +9,9 @@ import {
     MenuItem,
 } from "@mui/material";
 import { styled } from "@mui/system";
+import { SHA256 } from "crypto-js"; // Import for hashing
 import { uploadToIPFS } from "./ipfs"; // Ensure IPFS works properly
-import UserAuth from "./UserAuth";
+import UserAuth from "./UserAuth"; // Blockchain Smart Contract Instance
 
 // Styled Components
 const RegisterContainer = styled(Container)({
@@ -101,10 +102,13 @@ const Register = () => {
                 return;
             }
 
-            // Connect to MetaMask
             const accounts = await window.ethereum.request({
                 method: "eth_requestAccounts",
             });
+
+            // Hash email and password for privacy
+            const emailHash = SHA256(formData.email).toString();
+            const passwordHash = SHA256(formData.password).toString();
 
             // Check if user is already registered
             try {
@@ -123,14 +127,14 @@ const Register = () => {
             // Prepare User Data
             const userData = {
                 username: formData.username,
-                email: formData.email,
-                password: formData.password,
+                email: emailHash,
+                password: passwordHash,
                 number: formData.number,
                 gender: formData.gender,
                 dob: formData.dob,
             };
 
-            // Upload to IPFS
+            // Upload user data to IPFS
             const ipfsHash = await uploadToIPFS(JSON.stringify(userData));
             console.log("IPFS Hash:", ipfsHash);
 
@@ -143,13 +147,11 @@ const Register = () => {
             setMessage("Registration successful! Data saved to IPFS and Blockchain.");
         } catch (error) {
             console.error("Registration failed:", error);
-
-            // Handle Specific Errors
-            if (error.message.includes("User already registered")) {
-                setMessage("User is already registered. Please log in.");
-            } else {
-                setMessage(`Registration failed: ${error.message}`);
-            }
+            setMessage(
+                error.message.includes("User already registered")
+                    ? "User already registered. Please log in."
+                    : `Registration failed: ${error.message}`
+            );
         } finally {
             setLoading(false);
         }
@@ -163,7 +165,7 @@ const Register = () => {
                 method: "eth_requestAccounts",
             });
 
-            // Reset User Data
+            // Reset user data
             await UserAuth.methods.resetUser().send({
                 from: accounts[0],
                 gas: 300000,
