@@ -1,7 +1,7 @@
 import { create } from 'ipfs-http-client';
 
 // Connect to a local IPFS node
-const ipfs = create({ url: 'http://127.0.0.1:5003/api/v0' });
+const ipfs = create({ url: 'http://127.0.0.1:5004/api/v0' });
 
 // Function to upload data to IPFS
 export const uploadToIPFS = async (data) => {

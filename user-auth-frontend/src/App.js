@@ -2,7 +2,9 @@ import React, { useEffect, useState } from 'react';
 import Web3 from 'web3';
 import LandingPage from './LandingPage'; // Landing Page Component
 import Register from './Register'; // Register Page Component
-import Login from './Login.js'; // Login Page Component
+import Login from './Login'; // Login Page Component
+import Profile from './Profile/Profile'; // Profile Page Component
+import CreatePost from './CreatePost/createpost'; // CreatePost Page Component
 import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
 
 function App() {
@@ -72,6 +74,10 @@ function App() {
                     <Route path="/register" element={<Register account={account} web3={web3} />} />
                     {/* Login Page */}
                     <Route path="/login" element={<Login account={account} />} />
+                    {/* Profile Page */}
+                    <Route path="/profile" element={<Profile account={account} web3={web3} />} />
+                    {/* CreatePost Page */}
+                    <Route path="/createpost" element={<CreatePost account={account} web3={web3} />} />
                 </Routes>
             </div>
         </Router>

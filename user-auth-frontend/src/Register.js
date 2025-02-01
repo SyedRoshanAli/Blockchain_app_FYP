@@ -10,7 +10,7 @@ import {
 } from "@mui/material";
 import { styled } from "@mui/system";
 import { uploadToIPFS } from "./ipfs"; // Ensure IPFS works properly
-import UserAuth from "./UserAuth";
+import { UserAuthContract } from "./UserAuth"; // Import the correct contract reference
 
 // Styled Components
 const RegisterContainer = styled(Container)({
@@ -71,11 +71,8 @@ const Register = () => {
         setErrors({ ...errors, [name]: false });
     };
 
-    // Handle Form Submission
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-
-        // Validate Inputs
+    // Validate Inputs
+    const validateInputs = () => {
         const newErrors = {
             username: formData.username.trim() === "",
             email: formData.email.trim() === "",
@@ -86,7 +83,14 @@ const Register = () => {
         };
 
         setErrors(newErrors);
-        if (Object.values(newErrors).some((val) => val)) {
+        return !Object.values(newErrors).some((val) => val);
+    };
+
+    // Handle Form Submission
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+
+        if (!validateInputs()) {
             setMessage("Please fill all required fields.");
             return;
         }
@@ -108,9 +112,10 @@ const Register = () => {
 
             // Check if user is already registered
             try {
-                const userIpfsHash = await UserAuth.methods.login().call({
-                    from: accounts[0],
-                });
+                const userIpfsHash = await UserAuthContract.methods
+                    .login(formData.email, formData.password)
+                    .call({ from: accounts[0] });
+
                 if (userIpfsHash) {
                     setMessage("User already registered! Please log in.");
                     setLoading(false);
@@ -135,21 +140,21 @@ const Register = () => {
             console.log("IPFS Hash:", ipfsHash);
 
             // Register user on the blockchain
-            await UserAuth.methods.register(ipfsHash).send({
-                from: accounts[0],
-                gas: 3000000,
-            });
+            await UserAuthContract.methods
+                .register(ipfsHash, formData.email, formData.password)
+                .send({
+                    from: accounts[0],
+                    gas: 3000000,
+                });
 
             setMessage("Registration successful! Data saved to IPFS and Blockchain.");
         } catch (error) {
             console.error("Registration failed:", error);
-
-            // Handle Specific Errors
-            if (error.message.includes("User already registered")) {
-                setMessage("User is already registered. Please log in.");
-            } else {
-                setMessage(`Registration failed: ${error.message}`);
-            }
+            setMessage(
+                error.message.includes("User already registered")
+                    ? "User is already registered. Please log in."
+                    : `Registration failed: ${error.message}`
+            );
         } finally {
             setLoading(false);
         }
@@ -164,7 +169,7 @@ const Register = () => {
             });
 
             // Reset User Data
-            await UserAuth.methods.resetUser().send({
+            await UserAuthContract.methods.resetUser().send({
                 from: accounts[0],
                 gas: 300000,
             });
