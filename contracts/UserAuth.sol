@@ -10,10 +10,14 @@ contract UserAuth {
         bool isRegistered;    // Flag to check if user exists
     }
 
+    // Modified mappings
+    mapping(string => address) private usernameToAddress;  // Map username to address
+    mapping(address => string[]) private usernames;        // Map address to usernames
+    mapping(string => bool) private usernameExists;        // Track if username exists
+    string[] private allUsernames;                         // Array to track all usernames
+
     // State variables
     mapping(address => mapping(string => User)) private users;    // Map address and username to user data
-    mapping(string => bool) private usernameExists;              // Track if username exists globally
-    mapping(address => string[]) private usernames;              // Track usernames for each address
 
     // Events
     event UserRegistered(string username, string ipfsHash, address userAddress);
@@ -29,6 +33,18 @@ contract UserAuth {
         // Ensure the username is unique globally
         require(!usernameExists[_username], "Username already exists");
         
+        // Store username to address mapping
+        usernameToAddress[_username] = msg.sender;
+        
+        // Add username to global list
+        allUsernames.push(_username);
+        
+        // Add to user's usernames
+        usernames[msg.sender].push(_username);
+        
+        // Mark username as taken
+        usernameExists[_username] = true;
+
         // Create new user
         users[msg.sender][_username] = User({
             ipfsHash: _ipfsHash,
@@ -36,10 +52,6 @@ contract UserAuth {
             userAddress: msg.sender,
             isRegistered: true
         });
-
-        // Mark username as taken and add to user's username list
-        usernameExists[_username] = true;
-        usernames[msg.sender].push(_username);
 
         // Emit registration event
         emit UserRegistered(_username, _ipfsHash, msg.sender);
@@ -66,6 +78,17 @@ contract UserAuth {
         
         // Emit update event
         emit UserUpdated(_username, _newIpfsHash, msg.sender);
+    }
+
+    // Get address for a username
+    function getAddressByUsername(string memory _username) public view returns (address) {
+        require(usernameExists[_username], "Username does not exist");
+        return usernameToAddress[_username];
+    }
+
+    // Get all registered usernames
+    function getAllUsernames() public view returns (string[] memory) {
+        return allUsernames;
     }
 
     // Get all usernames for an address

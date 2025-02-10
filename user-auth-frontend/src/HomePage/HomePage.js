@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { CreatePostContract } from "../UserAuth";
+import { CreatePostContract, UserAuthContract } from "../UserAuth";
 import { format } from 'date-fns';
 import { 
     Heart, 
@@ -32,6 +32,9 @@ const HomePage = () => {
     const [error, setError] = useState(null);
     const [showSettings, setShowSettings] = useState(false);
     const [darkMode, setDarkMode] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searchResults, setSearchResults] = useState([]);
+    const [isSearching, setIsSearching] = useState(false);
     const navigate = useNavigate();
 
     useEffect(() => {
@@ -134,76 +137,122 @@ const HomePage = () => {
         navigate('/home');
     };
 
+    const handleSearch = async (e) => {
+        const query = e.target.value;
+        setSearchQuery(query);
+
+        if (!query.trim()) {
+            setSearchResults([]);
+            return;
+        }
+
+        setIsSearching(true);
+        try {
+            const allUsernames = await UserAuthContract.methods
+                .getAllUsernames()
+                .call();
+
+            const searchResults = allUsernames
+                .filter(username => 
+                    username.toLowerCase().includes(query.toLowerCase())
+                )
+                .map(async (username) => {
+                    const address = await UserAuthContract.methods
+                        .getAddressByUsername(username)
+                        .call();
+                    return {
+                        username,
+                        address
+                    };
+                });
+
+            const resolvedResults = await Promise.all(searchResults);
+            setSearchResults(resolvedResults);
+        } catch (error) {
+            console.error("Error searching users:", error);
+            toast.error("Failed to search users");
+        } finally {
+            setIsSearching(false);
+        }
+    };
+
     return (
-        <div className={`soft-ui-container ${darkMode ? 'dark-mode' : ''}`}>
-            <aside className="soft-ui-sidebar">
-                <div className="sidebar-header">
-                    <h3>BlockConnect</h3>
+        <div className="layout-container">
+            {/* Left Sidebar */}
+            <aside className="left-sidebar">
+                <div className="logo">
+                    <h1>BlockConnect</h1>
                 </div>
                 <nav className="sidebar-nav">
-                    <ul>
-                        <li>
-                            <a href="/home" onClick={handleHomeClick} className="active">
+                    <ul className="nav-list">
+                        <li className="nav-item">
+                            <a href="/home" className="active">
                                 <Home size={20} />
                                 <span>Home</span>
                             </a>
                         </li>
-                        <li>
+                        <li className="nav-item">
                             <a href="/profile">
                                 <User size={20} />
                                 <span>Profile</span>
                             </a>
                         </li>
-                        <li>
+                        <li className="nav-item">
+                            <a href="/data-control">
+                                <Shield size={20} />
+                                <span>Data Control</span>
+                            </a>
+                        </li>
+                        <li className="nav-item">
                             <a href="/explore">
                                 <Search size={20} />
                                 <span>Explore</span>
                             </a>
                         </li>
-                        <li>
+                        <li className="nav-item">
                             <a href="/notifications">
                                 <Bell size={20} />
                                 <span>Notifications</span>
                             </a>
                         </li>
-                        <li>
+                        <li className="nav-item">
                             <a href="/messages">
                                 <MessageSquare size={20} />
                                 <span>Messages</span>
                             </a>
                         </li>
-                        <li>
+                        <li className="nav-item">
                             <a href="/bookmarks">
                                 <Bookmark size={20} />
                                 <span>Bookmarks</span>
                             </a>
                         </li>
-                        <li>
+                        <li className="nav-item">
                             <a href="/communities">
                                 <Users size={20} />
                                 <span>Communities</span>
                             </a>
                         </li>
-                        <li>
+                        <li className="nav-item">
                             <a href="/trending">
                                 <TrendingUp size={20} />
                                 <span>Trending</span>
                             </a>
                         </li>
-                        <li>
+                        <li className="nav-item">
                             <a href="/topics">
                                 <Hash size={20} />
                                 <span>Topics</span>
                             </a>
                         </li>
-                        <li>
+                        <li className="nav-item">
                             <a href="#" onClick={handleHiddenTweetsClick}>
                                 <Eye size={20} />
                                 <span>Hidden Tweets</span>
                             </a>
                         </li>
                         <li className="sidebar-divider"></li>
-                        <li>
+                        <li className="nav-item">
                             <button className="settings-button" onClick={() => setShowSettings(!showSettings)}>
                                 <Settings size={20} />
                                 <span>Settings</span>
@@ -238,7 +287,7 @@ const HomePage = () => {
                                 </div>
                             )}
                         </li>
-                        <li>
+                        <li className="nav-item">
                             <a href="#logout" onClick={handleLogout} className="logout-button">
                                 <LogOut size={20} />
                                 <span>Logout</span>
@@ -248,84 +297,127 @@ const HomePage = () => {
                 </nav>
             </aside>
 
+            {/* Main Content */}
             <main className="main-content">
-                <div className="compose-tweet">
-                    <div className="compose-tweet-input">
-                        <div className="user-avatar">
-                            {/* Get first letter of username from localStorage */}
-                            {JSON.parse(localStorage.getItem('userSession'))?.username?.[0]?.toUpperCase() || 'U'}
-                        </div>
-                        <div className="compose-input-container">
-                            <input 
-                                type="text" 
-                                placeholder="What's happening?"
-                                className="compose-input"
-                            />
-                            <div className="compose-actions">
-                                <button className="post-tweet-btn">Post</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <header className="main-header">
 
-                {loading ? (
-                    <div className="loading-container">
-                        <div className="loader"></div>
-                        <p>Loading posts...</p>
-                    </div>
-                ) : error ? (
-                    <div className="error-container">
-                        <p>{error}</p>
-                    </div>
-                ) : (
-                    <div className="posts-container">
-                        {posts.length === 0 ? (
-                            <div className="no-posts">
-                                <p>No posts yet. Be the first to post something!</p>
-                            </div>
-                        ) : (
-                            posts.map((post) => (
-                                <article key={post.id} className="post-card">
-                                    <div className="post-header">
-                                        <div className="user-avatar" style={{ backgroundColor: `#${post.creator.slice(2, 8)}` }}>
-                                            {post.username ? post.username[0].toUpperCase() : 'A'}
+                </header>
+
+                <div className="content-scroll">
+                    <div className="search-container center-search">
+                        <Search size={20} className="search-icon" />
+                        <input 
+                            type="text" 
+                            placeholder="Search BlockConnect"
+                            value={searchQuery}
+                            onChange={handleSearch}
+                        />
+                        {searchQuery && searchResults.length > 0 && (
+                            <div className="search-results">
+                                {searchResults.map((user, index) => (
+                                    <div 
+                                        key={index} 
+                                        className="search-result-item"
+                                        onClick={() => {
+                                            const encodedUsername = encodeURIComponent(user.username);
+                                            navigate(`/profile/${encodedUsername}`);
+                                            setSearchQuery('');
+                                            setSearchResults([]);
+                                        }}
+                                        role="button"
+                                        tabIndex={0}
+                                    >
+                                        <div 
+                                            className="user-avatar"
+                                            style={{ backgroundColor: `#${user.address.slice(2, 8)}` }}
+                                        >
+                                            {user.username[0].toUpperCase()}
                                         </div>
-                                        <div className="post-content-wrapper">
-                                            <div className="post-meta">
-                                                <span className="user-name">{post.username || 'Anonymous'}</span>
-                                                <span className="user-handle">@{post.creator.slice(0, 6)}...{post.creator.slice(-4)}</span>
-                                                <span className="post-dot">·</span>
-                                                <span className="post-time">{formatDate(post.timestamp)}</span>
-                                            </div>
-                                            <p className="post-text">{post.caption}</p>
-                                            <div className="post-actions">
-                                                <button className="action-button like-button">
-                                                    <Heart size={18} />
-                                                    <span>0</span>
-                                                </button>
-                                                <button className="action-button comment-button">
-                                                    <MessageCircle size={18} />
-                                                    <span>0</span>
-                                                </button>
-                                                <button className="action-button share-button">
-                                                    <Share2 size={18} />
-                                                    <span>0</span>
-                                                </button>
-                                            </div>
+                                        <div className="user-info">
+                                            <p className="user-name">{user.username}</p>
+                                            <p className="user-handle">@{user.address.slice(0, 6)}...{user.address.slice(-4)}</p>
                                         </div>
                                     </div>
-                                </article>
-                            ))
+                                ))}
+                            </div>
                         )}
                     </div>
-                )}
+
+                    <div className="compose-tweet">
+                        <div className="compose-tweet-input">
+                            <div className="user-avatar">
+                                {/* Get first letter of username from localStorage */}
+                                {JSON.parse(localStorage.getItem('userSession'))?.username?.[0]?.toUpperCase() || 'U'}
+                            </div>
+                            <div className="compose-input-container">
+                                <input 
+                                    type="text" 
+                                    placeholder="What's happening?"
+                                    className="compose-input"
+                                />
+                                <div className="compose-actions">
+                                    <button className="post-tweet-btn">Post</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="posts-container">
+                        {loading ? (
+                            <div className="loading-container">
+                                <div className="loader"></div>
+                                <p>Loading posts...</p>
+                            </div>
+                        ) : error ? (
+                            <div className="error-container">
+                                <p>{error}</p>
+                            </div>
+                        ) : (
+                            posts.length === 0 ? (
+                                <div className="no-posts">
+                                    <p>No posts yet. Be the first to post something!</p>
+                                </div>
+                            ) : (
+                                posts.map((post) => (
+                                    <article key={post.id} className="post-card">
+                                        <div className="post-header">
+                                            <div className="user-avatar" style={{ backgroundColor: `#${post.creator.slice(2, 8)}` }}>
+                                                {post.username ? post.username[0].toUpperCase() : 'A'}
+                                            </div>
+                                            <div className="post-content-wrapper">
+                                                <div className="post-meta">
+                                                    <span className="user-name">{post.username || 'Anonymous'}</span>
+                                                    <span className="user-handle">@{post.creator.slice(0, 6)}...{post.creator.slice(-4)}</span>
+                                                    <span className="post-dot">·</span>
+                                                    <span className="post-time">{formatDate(post.timestamp)}</span>
+                                                </div>
+                                                <p className="post-text">{post.caption}</p>
+                                                <div className="post-actions">
+                                                    <button className="action-button like-button">
+                                                        <Heart size={18} />
+                                                        <span>0</span>
+                                                    </button>
+                                                    <button className="action-button comment-button">
+                                                        <MessageCircle size={18} />
+                                                        <span>0</span>
+                                                    </button>
+                                                    <button className="action-button share-button">
+                                                        <Share2 size={18} />
+                                                        <span>0</span>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </article>
+                                ))
+                            )
+                        )}
+                    </div>
+                </div>
             </main>
 
-            <div className="right-sidebar">
-                <div className="search-container">
-                    <Search size={20} className="search-icon" />
-                    <input type="text" placeholder="Search BlockConnect" />
-                </div>
+            {/* Right Sidebar */}
+            <aside className="right-sidebar">
                 <div className="trending-container">
                     <h3>Trending</h3>
                     <div className="trending-item">
@@ -344,7 +436,7 @@ const HomePage = () => {
                         <span className="trending-count">12.9K posts</span>
                     </div>
                 </div>
-            </div>
+            </aside>
         </div>
     );
 };
