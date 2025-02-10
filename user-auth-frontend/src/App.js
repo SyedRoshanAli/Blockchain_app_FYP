@@ -5,7 +5,10 @@ import Register from './Register'; // Register Page Component
 import Login from './Login'; // Login Page Component
 import Profile from './Profile/Profile'; // Profile Page Component
 import CreatePost from './CreatePost/createpost'; // CreatePost Page Component
+import HomePage from './HomePage/HomePage'; // Added HomePage import
+import DataControl from './DataControl';
 import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast'; // For toast notifications
 
 function App() {
     const [account, setAccount] = useState(''); // Store the connected MetaMask account
@@ -63,6 +66,9 @@ function App() {
     return (
         <Router>
             <div className="App">
+                {/* Toast notifications container */}
+                <Toaster position="top-right" />
+                
                 {/* Display error or success messages */}
                 {message && <p style={{ color: 'red', textAlign: 'center' }}>{message}</p>}
 
@@ -70,14 +76,48 @@ function App() {
                 <Routes>
                     {/* Landing Page (Default) */}
                     <Route path="/" element={<LandingPage account={account} />} />
+                    
+                    {/* Home Page (Feed) */}
+                    <Route path="/home" element={
+                        <HomePage 
+                            account={account} 
+                            web3={web3} 
+                        />
+                    } />
+                    
                     {/* Register Page */}
-                    <Route path="/register" element={<Register account={account} web3={web3} />} />
+                    <Route path="/register" element={
+                        <Register 
+                            account={account} 
+                            web3={web3} 
+                        />
+                    } />
+                    
                     {/* Login Page */}
-                    <Route path="/login" element={<Login account={account} />} />
+                    <Route path="/login" element={
+                        <Login 
+                            account={account} 
+                        />
+                    } />
+                    
                     {/* Profile Page */}
-                    <Route path="/profile" element={<Profile account={account} web3={web3} />} />
+                    <Route path="/profile" element={
+                        <Profile 
+                            account={account} 
+                            web3={web3} 
+                        />
+                    } />
+                    
                     {/* CreatePost Page */}
-                    <Route path="/createpost" element={<CreatePost account={account} web3={web3} />} />
+                    <Route path="/createpost" element={
+                        <CreatePost 
+                            account={account} 
+                            web3={web3} 
+                        />
+                    } />
+                    
+                    {/* Data Control Page */}
+                    <Route path="/data-control" element={<DataControl />} />
                 </Routes>
             </div>
         </Router>

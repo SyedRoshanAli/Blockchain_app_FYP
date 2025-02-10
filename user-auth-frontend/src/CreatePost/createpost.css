@@ -1,17 +1,18 @@
 .createpost-container {
     max-width: 600px;
     margin: 2rem auto;
-    padding: 2rem;
-    border: 1px solid #ccc;
-    border-radius: 8px;
-    background-color: #f9f9f9;
-    box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+    padding: 1.5rem;
+    border-radius: 16px;
+    background-color: #ffffff;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
 }
 
 .createpost-container h2 {
     text-align: center;
     margin-bottom: 1.5rem;
-    color: #333;
+    color: #1a1a1a;
+    font-size: 1.5rem;
+    font-weight: 600;
 }
 
 .createpost-form {
@@ -20,47 +21,394 @@
     gap: 1rem;
 }
 
-.createpost-form label {
-    font-weight: bold;
-    color: #555;
+.post-content-area {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    padding: 1rem;
+    background-color: #f8f9fa;
+    border-radius: 12px;
 }
 
-.createpost-form input,
-.createpost-form textarea {
-    padding: 0.5rem;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    font-size: 1rem;
-}
-
-.createpost-form textarea {
-    resize: vertical;
-    height: 100px;
-}
-
-.createpost-form button {
-    padding: 0.75rem;
-    background-color: #007bff;
-    color: #fff;
+.caption-input {
+    width: 100%;
+    min-height: 100px;
+    padding: 1rem;
     border: none;
-    border-radius: 4px;
+    border-radius: 8px;
     font-size: 1rem;
+    resize: none;
+    background-color: #ffffff;
+    color: #1a1a1a;
+    transition: all 0.3s ease;
+}
+
+.caption-input:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(103, 114, 229, 0.2);
+}
+
+.upload-area {
+    display: flex;
+    justify-content: center;
+    padding: 2rem;
+    border: 2px dashed #e0e0e0;
+    border-radius: 12px;
+    background-color: #ffffff;
+    transition: all 0.3s ease;
+}
+
+.upload-label {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    color: #6772e5;
     cursor: pointer;
-    transition: background-color 0.3s;
+    transition: all 0.3s ease;
 }
 
-.createpost-form button:hover {
-    background-color: #0056b3;
+.upload-label:hover {
+    color: #5563c1;
 }
 
-.createpost-form button:disabled {
-    background-color: #aaa;
+.hidden-input {
+    display: none;
+}
+
+.image-preview-container {
+    position: relative;
+    width: 100%;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.image-preview {
+    width: 100%;
+    max-height: 300px;
+    object-fit: cover;
+}
+
+.remove-image-btn {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    background-color: rgba(0, 0, 0, 0.5);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.remove-image-btn:hover {
+    background-color: rgba(0, 0, 0, 0.7);
+}
+
+.post-button {
+    padding: 0.75rem;
+    background-color: #6772e5;
+    color: #ffffff;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+}
+
+.post-button:hover {
+    background-color: #5563c1;
+    transform: translateY(-1px);
+}
+
+.post-button:disabled {
+    background-color: #a0aec0;
     cursor: not-allowed;
+    transform: none;
+}
+
+.spinner {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 .message {
     text-align: center;
     margin-top: 1rem;
-    color: green;
+    padding: 0.75rem;
+    border-radius: 8px;
+    font-weight: 500;
+}
+
+.message.success {
+    background-color: #def7ec;
+    color: #03543f;
+}
+
+.message.error {
+    background-color: #fde8e8;
+    color: #9b1c1c;
+}
+
+/* Dark mode support */
+.dark-mode .createpost-container {
+    background-color: #2d2d2d;
+}
+
+.dark-mode .post-content-area {
+    background-color: #1a1a1a;
+}
+
+.dark-mode .caption-input {
+    background-color: #2d2d2d;
+    color: #ffffff;
+}
+
+.dark-mode .upload-area {
+    background-color: #2d2d2d;
+    border-color: #404040;
+}
+
+.dark-mode h2 {
+    color: #ffffff;
+}
+
+.create-tweet-container {
+    max-width: 600px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+}
+
+.tweet-form-card {
+    background: white;
+    border-radius: 16px;
+    padding: 2rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.tweet-form-card h2 {
+    margin: 0 0 1.5rem;
+    color: #1e293b;
+    font-size: 1.5rem;
+    font-weight: 600;
+}
+
+.tweet-input-group {
+    position: relative;
+    margin-bottom: 1.5rem;
+}
+
+.tweet-input-group textarea {
+    width: 100%;
+    padding: 1rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    resize: none;
+    font-size: 1rem;
+    line-height: 1.5;
+    min-height: 120px;
+    transition: border-color 0.2s ease;
+}
+
+.tweet-input-group textarea:focus {
+    outline: none;
+    border-color: #0ea5e9;
+    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
+}
+
+.tweet-char-count {
+    position: absolute;
+    bottom: -1.5rem;
+    right: 0;
+    font-size: 0.875rem;
+    color: #64748b;
+}
+
+.tweet-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 1rem;
+    margin-top: 2rem;
+}
+
+.cancel-button {
+    padding: 0.625rem 1.25rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 20px;
+    background: white;
+    color: #64748b;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.tweet-button {
+    padding: 0.625rem 1.5rem;
+    border: none;
+    border-radius: 20px;
+    background: #0ea5e9;
+    color: white;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.tweet-button:disabled {
+    background: #94a3b8;
+    cursor: not-allowed;
+}
+
+.spinner {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Dark mode */
+.dark-mode .tweet-form-card {
+    background: #1f2937;
+}
+
+.dark-mode .tweet-form-card h2 {
+    color: #e5e7eb;
+}
+
+.dark-mode .tweet-input-group textarea {
+    background: #374151;
+    border-color: #4b5563;
+    color: #e5e7eb;
+}
+
+.dark-mode .cancel-button {
+    background: #374151;
+    border-color: #4b5563;
+    color: #e5e7eb;
+}
+
+.dark-mode .message.success {
+    background: #065f46;
+    color: #d1fae5;
+}
+
+.dark-mode .message.error {
+    background: #991b1b;
+    color: #fee2e2;
+}
+
+.tweet-compose {
+    max-width: 600px;
+    margin: 20px auto;
+    padding: 16px;
+    background: white;
+    border-radius: 16px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.tweet-compose h2 {
+    font-size: 20px;
     font-weight: bold;
+    margin-bottom: 16px;
+    color: #0f1419;
+}
+
+.tweet-compose form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.tweet-compose textarea {
+    width: 100%;
+    min-height: 150px;
+    padding: 12px;
+    border: none;
+    resize: none;
+    font-size: 16px;
+    line-height: 1.5;
+    outline: none;
+}
+
+.tweet-compose textarea::placeholder {
+    color: #536471;
+}
+
+.tweet-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 12px;
+    border-top: 1px solid #eff3f4;
+}
+
+.character-count {
+    color: #536471;
+    font-size: 14px;
+}
+
+.button-group {
+    display: flex;
+    gap: 12px;
+}
+
+.tweet-button {
+    background-color: #1d9bf0;
+    color: white;
+    padding: 8px 16px;
+    border-radius: 9999px;
+    border: none;
+    font-weight: bold;
+    font-size: 15px;
+    cursor: pointer;
+    min-width: 80px;
+}
+
+.tweet-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.tweet-button:hover:not(:disabled) {
+    background-color: #1a8cd8;
+}
+
+.cancel-button {
+    background-color: transparent;
+    color: #536471;
+    padding: 8px 16px;
+    border-radius: 9999px;
+    border: none;
+    font-size: 15px;
+    cursor: pointer;
+}
+
+.cancel-button:hover {
+    background-color: rgba(15, 20, 25, 0.1);
 }

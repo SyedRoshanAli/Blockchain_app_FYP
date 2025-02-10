@@ -14,6 +14,7 @@ import { styled } from "@mui/system";
 import { SHA256 } from "crypto-js"; // Import for hashing
 import { useNavigate } from "react-router-dom"; // Import useNavigate for redirection
 import { UserAuthContract } from "./UserAuth"; // Updated import for UserAuthContract
+import { toast } from "react-hot-toast";
 
 // Styled Components
 const LoginContainer = styled(Container)({
@@ -56,83 +57,84 @@ const NavButton = styled("a")({
 // Login Component
 const Login = () => {
     const [formData, setFormData] = useState({
-        email: "",
+        username: "",
         password: "",
     });
     const [message, setMessage] = useState("");
     const [loading, setLoading] = useState(false);
-    const navigate = useNavigate(); // Initialize the navigate hook
+    const navigate = useNavigate();
 
-    // Handle Input Changes
     const handleInputChange = (e) => {
         const { name, value } = e.target;
         setFormData({ ...formData, [name]: value });
     };
 
-    // Handle Form Submission
     const handleSubmit = async (e) => {
         e.preventDefault();
         setLoading(true);
         setMessage("");
 
         try {
-            // Ensure MetaMask is installed
             if (!window.ethereum) {
-                alert("MetaMask is not installed. Please install MetaMask.");
-                setMessage("MetaMask is not installed. Please install MetaMask.");
-                return;
+                throw new Error("MetaMask is not installed");
             }
 
-            // Connect to MetaMask
             const accounts = await window.ethereum.request({
                 method: "eth_requestAccounts",
             });
 
-            // Hash email and password
-            const emailHash = SHA256(formData.email).toString();
-            const passwordHash = SHA256(formData.password).toString();
+            // First check if username exists
+            const isAvailable = await UserAuthContract.methods
+                .isUsernameAvailable(formData.username)
+                .call();
 
-            // Fetch user IPFS hash from blockchain
-            const userIpfsHash = await UserAuthContract.methods
-                .login(formData.email, formData.password)
+            if (isAvailable) {
+                throw new Error("Username not found. Please register first.");
+            }
+
+            // Get user's IPFS hash using the login function
+            const ipfsHash = await UserAuthContract.methods
+                .login(formData.username)
                 .call({ from: accounts[0] });
 
-            if (userIpfsHash) {
-                // Fetch user data from IPFS
-                const response = await fetch(`http://127.0.0.1:8083/ipfs/${userIpfsHash}`);
-                if (!response.ok) {
-                    alert("Failed to fetch user data. Please try again.");
-                    setMessage("Failed to fetch user data. Please try again.");
-                    return;
-                }
-
-                const userData = await response.json();
-                console.log("Fetched User Data:", userData);
-
-                // Verify hashed credentials
-                if (
-                    SHA256(userData.email).toString() === emailHash &&
-                    SHA256(userData.password).toString() === passwordHash
-                ) {
-                    alert("Logged in successfully!");
-                    setMessage("Logged in successfully!");
-
-                    // Save user data to localStorage for Profile page usage
-                    localStorage.setItem("userData", JSON.stringify(userData));
-
-                    // Redirect to Profile page
-                    navigate("/profile");
-                } else {
-                    alert("Invalid email or password. Please try again.");
-                    setMessage("Invalid email or password. Please try again.");
-                }
-            } else {
-                alert("User not registered. Please register first.");
-                setMessage("User not registered. Please register first.");
+            if (!ipfsHash) {
+                throw new Error("Failed to retrieve user data");
             }
+
+            // Fetch user data from IPFS
+            const response = await fetch(`http://127.0.0.1:8083/ipfs/${ipfsHash}`);
+            if (!response.ok) {
+                throw new Error("Failed to fetch user data");
+            }
+
+            const userData = await response.json();
+
+            // Verify password
+            if (SHA256(formData.password).toString() === SHA256(userData.password).toString()) {
+                // Store user session
+                localStorage.setItem('userData', JSON.stringify(userData));
+                localStorage.setItem('userSession', JSON.stringify({
+                    address: accounts[0],
+                    username: formData.username
+                }));
+
+                toast.success("Login successful!");
+                navigate("/home");
+            } else {
+                throw new Error("Invalid password");
+            }
+
         } catch (error) {
             console.error("Error during login:", error);
-            setMessage("An error occurred. Please try again.");
+            // Check for specific contract error messages
+            if (error.message.includes("User not registered")) {
+                setMessage("This username is not registered with your account");
+            } else if (error.message.includes("Unauthorized access")) {
+                setMessage("This username belongs to a different account");
+            } else {
+                setMessage(error.message);
+            }
+            toast.error(error.message);
         } finally {
             setLoading(false);
         }
@@ -158,17 +160,17 @@ const Login = () => {
                 <LoginForm onSubmit={handleSubmit} noValidate>
                     <Box width="100%">
                         <Typography variant="subtitle1" gutterBottom>
-                            Email Address
+                            Username
                         </Typography>
                         <TextField
-                            name="email"
+                            name="username"
                             size="small"
                             variant="outlined"
                             margin="normal"
                             required
                             fullWidth
                             autoFocus
-                            value={formData.email}
+                            value={formData.username}
                             onChange={handleInputChange}
                         />
                     </Box>
@@ -210,6 +212,11 @@ const Login = () => {
                             Create an account
                         </Link>
                     </Box>
+                    {message && (
+                        <Typography color="error" sx={{ mt: 2 }}>
+                            {message}
+                        </Typography>
+                    )}
                 </LoginForm>
             </LoginContainer>
         </>

@@ -11,6 +11,8 @@ import {
 import { styled } from "@mui/system";
 import { uploadToIPFS } from "./ipfs"; // Ensure IPFS works properly
 import { UserAuthContract } from "./UserAuth"; // Import the correct contract reference
+import { useNavigate } from "react-router-dom";
+import { toast } from "react-hot-toast";
 
 // Styled Components
 const RegisterContainer = styled(Container)({
@@ -52,6 +54,7 @@ const NavButton = styled("a")({
 
 // Register Component
 const Register = () => {
+    const navigate = useNavigate();
     const [formData, setFormData] = useState({
         username: "",
         email: "",
@@ -99,30 +102,21 @@ const Register = () => {
         setMessage("");
 
         try {
-            // Ensure MetaMask is installed
             if (!window.ethereum) {
-                setMessage("MetaMask is not installed. Please install MetaMask.");
-                return;
+                throw new Error("MetaMask is not installed");
             }
 
-            // Connect to MetaMask
             const accounts = await window.ethereum.request({
                 method: "eth_requestAccounts",
             });
 
-            // Check if user is already registered
-            try {
-                const userIpfsHash = await UserAuthContract.methods
-                    .login(formData.email, formData.password)
-                    .call({ from: accounts[0] });
+            // Check if username is available
+            const isAvailable = await UserAuthContract.methods
+                .isUsernameAvailable(formData.username)
+                .call();
 
-                if (userIpfsHash) {
-                    setMessage("User already registered! Please log in.");
-                    setLoading(false);
-                    return;
-                }
-            } catch (err) {
-                console.log("User not registered, proceeding with registration.");
+            if (!isAvailable) {
+                throw new Error("Username already taken");
             }
 
             // Prepare User Data
@@ -133,28 +127,48 @@ const Register = () => {
                 number: formData.number,
                 gender: formData.gender,
                 dob: formData.dob,
+                address: accounts[0],
+                timestamp: new Date().toISOString()
             };
 
             // Upload to IPFS
             const ipfsHash = await uploadToIPFS(JSON.stringify(userData));
             console.log("IPFS Hash:", ipfsHash);
 
-            // Register user on the blockchain
+            // Register user on the blockchain with new contract function
             await UserAuthContract.methods
-                .register(ipfsHash, formData.email, formData.password)
+                .register(formData.username, ipfsHash)
                 .send({
                     from: accounts[0],
                     gas: 3000000,
                 });
 
-            setMessage("Registration successful! Data saved to IPFS and Blockchain.");
+            // Store user data in localStorage
+            localStorage.setItem('userData', JSON.stringify(userData));
+            localStorage.setItem('userSession', JSON.stringify({
+                address: accounts[0],
+                username: formData.username
+            }));
+
+            toast.success("Registration successful! You can now create posts.");
+            
+            // Reset form after successful registration
+            setFormData({
+                username: "",
+                email: "",
+                password: "",
+                number: "",
+                gender: "",
+                dob: "",
+            });
+            
+            // Instead of navigating, just show a success message
+            setMessage("Registration successful! You can register another account or proceed to create posts.");
+
         } catch (error) {
             console.error("Registration failed:", error);
-            setMessage(
-                error.message.includes("User already registered")
-                    ? "User is already registered. Please log in."
-                    : `Registration failed: ${error.message}`
-            );
+            toast.error(error.message);
+            setMessage(error.message);
         } finally {
             setLoading(false);
         }
@@ -168,16 +182,30 @@ const Register = () => {
                 method: "eth_requestAccounts",
             });
 
-            // Reset User Data
-            await UserAuthContract.methods.resetUser().send({
-                from: accounts[0],
-                gas: 300000,
-            });
+            // Get usernames for this address
+            const usernames = await UserAuthContract.methods
+                .getUsernames(accounts[0])
+                .call();
 
+            // Reset each username
+            for (const username of usernames) {
+                await UserAuthContract.methods
+                    .resetUser(username)
+                    .send({
+                        from: accounts[0],
+                        gas: 300000,
+                    });
+            }
+
+            localStorage.removeItem('userData');
+            localStorage.removeItem('userSession');
             setMessage("User data has been reset successfully!");
+            toast.success("Reset successful!");
+
         } catch (error) {
             console.error("Reset failed:", error);
-            setMessage(`Reset failed: ${error.message}`);
+            toast.error(error.message);
+            setMessage(error.message);
         }
     };
 
