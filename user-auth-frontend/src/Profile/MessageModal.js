@@ -1,17 +1,70 @@
 import React, { useState } from 'react';
 import { X, Send, Smile, Image, Paperclip } from 'lucide-react';
+import { messageService } from '../services/messageService';
+import { UserAuthContract } from "../UserAuth";
+import { toast } from 'react-hot-toast';
 import './MessageModal.css';
 
 const MessageModal = ({ isOpen, onClose, recipient }) => {
     const [message, setMessage] = useState('');
+    const [sending, setSending] = useState(false);
 
     if (!isOpen) return null;
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
-        console.log(`Sending message to ${recipient}: ${message}`);
-        setMessage('');
-        onClose();
+        if (!message.trim()) return;
+
+        try {
+            setSending(true);
+            
+            // Get current user's address
+            const accounts = await window.ethereum.request({
+                method: "eth_requestAccounts"
+            });
+            const currentUserAddress = accounts[0];
+
+            // Get recipient's address from username
+            const recipientAddress = await UserAuthContract.methods
+                .getAddressByUsername(recipient)
+                .call();
+
+            // Debug logs
+            console.log('Current user address:', currentUserAddress);
+            console.log('Recipient address:', recipientAddress);
+            console.log('Recipient username:', recipient);
+            console.log('Are addresses equal?', currentUserAddress.toLowerCase() === recipientAddress.toLowerCase());
+
+            // Check if sending to self
+            if (currentUserAddress.toLowerCase() === recipientAddress.toLowerCase()) {
+                toast.error(`You are currently logged in as ${recipient}. Please switch accounts to send a message to this user.`);
+                setSending(false);
+                return;
+            }
+
+            console.log('Proceeding to send message:', {
+                from: currentUserAddress,
+                to: recipientAddress,
+                recipient: recipient,
+                message: message.trim()
+            });
+
+            // Send message using messageService
+            await messageService.sendMessage(recipientAddress, message.trim());
+            
+            toast.success(`Message sent to ${recipient}`);
+            setMessage('');
+            onClose();
+        } catch (error) {
+            console.error('Error details:', error);
+            if (error.message.includes('Cannot send message to yourself')) {
+                toast.error(`You are currently logged in as ${recipient}. Please switch accounts to send a message to this user.`);
+            } else {
+                toast.error('Failed to send message: ' + (error.message || 'Unknown error'));
+            }
+        } finally {
+            setSending(false);
+        }
     };
 
     return (
@@ -62,11 +115,12 @@ const MessageModal = ({ isOpen, onClose, recipient }) => {
                             placeholder={`Message ${recipient}`}
                             rows={1}
                             className="message-input"
+                            disabled={sending}
                         />
                         <button 
                             type="submit" 
                             className="send-button"
-                            disabled={!message.trim()}
+                            disabled={!message.trim() || sending}
                         >
                             <Send size={20} />
                         </button>

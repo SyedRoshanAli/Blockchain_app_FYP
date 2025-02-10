@@ -10,6 +10,7 @@ import DataControl from './DataControl';
 import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast'; // For toast notifications
 import UserProfile from './Profile/UserProfile';
+import Notifications from './components/Notifications';
 
 function App() {
     const [account, setAccount] = useState(''); // Store the connected MetaMask account
@@ -122,6 +123,9 @@ function App() {
 
                     {/* User Profile Page */}
                     <Route path="/profile/:username" element={<UserProfile />} />
+
+                    {/* Notifications Page */}
+                    <Route path="/notifications" element={<Notifications />} />
                 </Routes>
             </div>
         </Router>

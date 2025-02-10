@@ -3,8 +3,8 @@ import UserAuthABI from "./artifacts/UserAuth.json"; // Path to UserAuth ABI
 import CreatePostABI from "./artifacts/CreatePost.json"; // Path to CreatePost ABI
 
 // Deployed contract addresses
-const userAuthAddress = "0x3f77606CAB9805e01bdaC51b7f5eff63621604Ce"; // UserAuth address
-const createPostAddress = "0x1335447CE3cbe2E964090A2b1576C75Df762c498"; // CreatePost address
+const userAuthAddress = "0x133d93BEf8f74d0329Ad32279f337Bc780805D6F"; // UserAuth address
+const createPostAddress = "0x248faEB85D9c4808031aD7813137489d1981d296"; // CreatePost address
 
 // Web3 setup
 const web3 = new Web3(Web3.givenProvider || "http://localhost:7545");
@@ -216,6 +216,145 @@ const UserAuthContract = new web3.eth.Contract([
             }
         ],
         "name": "UserReset",
+        "type": "event"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "_to",
+                "type": "address"
+            },
+            {
+                "internalType": "string",
+                "name": "_content",
+                "type": "string"
+            }
+        ],
+        "name": "sendMessage",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "getUnreadMessageCount",
+        "outputs": [
+            {
+                "internalType": "uint256",
+                "name": "",
+                "type": "uint256"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "getMyMessages",
+        "outputs": [
+            {
+                "components": [
+                    {
+                        "internalType": "uint256",
+                        "name": "id",
+                        "type": "uint256"
+                    },
+                    {
+                        "internalType": "address",
+                        "name": "sender",
+                        "type": "address"
+                    },
+                    {
+                        "internalType": "address",
+                        "name": "recipient",
+                        "type": "address"
+                    },
+                    {
+                        "internalType": "string",
+                        "name": "content",
+                        "type": "string"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "timestamp",
+                        "type": "uint256"
+                    },
+                    {
+                        "internalType": "bool",
+                        "name": "isRead",
+                        "type": "bool"
+                    }
+                ],
+                "internalType": "struct UserAuth.Message[]",
+                "name": "",
+                "type": "tuple[]"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "uint256",
+                "name": "_messageId",
+                "type": "uint256"
+            }
+        ],
+        "name": "markMessageAsRead",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "internalType": "uint256",
+                "name": "messageId",
+                "type": "uint256"
+            },
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "from",
+                "type": "address"
+            },
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "to",
+                "type": "address"
+            },
+            {
+                "indexed": false,
+                "internalType": "uint256",
+                "name": "timestamp",
+                "type": "uint256"
+            }
+        ],
+        "name": "MessageSent",
+        "type": "event"
+    },
+    {
+        "anonymous": false,
+        "inputs": [
+            {
+                "indexed": true,
+                "internalType": "uint256",
+                "name": "messageId",
+                "type": "uint256"
+            },
+            {
+                "indexed": true,
+                "internalType": "address",
+                "name": "by",
+                "type": "address"
+            }
+        ],
+        "name": "MessageRead",
         "type": "event"
     }
 ], userAuthAddress);

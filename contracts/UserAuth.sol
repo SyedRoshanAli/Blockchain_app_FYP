@@ -10,6 +10,16 @@ contract UserAuth {
         bool isRegistered;    // Flag to check if user exists
     }
 
+    // New Message structure
+    struct Message {
+        uint256 id;
+        address sender;
+        address recipient;
+        string content;
+        uint256 timestamp;
+        bool isRead;
+    }
+
     // Modified mappings
     mapping(string => address) private usernameToAddress;  // Map username to address
     mapping(address => string[]) private usernames;        // Map address to usernames
@@ -19,10 +29,24 @@ contract UserAuth {
     // State variables
     mapping(address => mapping(string => User)) private users;    // Map address and username to user data
 
+    // New mappings for messages
+    mapping(address => Message[]) private userMessages;
+    mapping(address => uint256) private unreadMessageCount;
+    uint256 private messageIdCounter;
+
     // Events
     event UserRegistered(string username, string ipfsHash, address userAddress);
     event UserUpdated(string username, string newIpfsHash, address userAddress);
     event UserReset(string username, address userAddress);
+
+    // New events for messages
+    event MessageSent(
+        uint256 indexed messageId,
+        address indexed from,
+        address indexed to,
+        uint256 timestamp
+    );
+    event MessageRead(uint256 indexed messageId, address indexed by);
 
     // Register a new user
     function register(string memory _username, string memory _ipfsHash) public {
@@ -125,5 +149,80 @@ contract UserAuth {
 
         // Emit reset event
         emit UserReset(_username, msg.sender);
+    }
+
+    // New function to send a message
+    function sendMessage(address _to, string memory _content) public {
+        require(_to != address(0), "Invalid recipient address");
+        require(bytes(_content).length > 0, "Message cannot be empty");
+        require(_to != msg.sender, "Cannot send message to yourself");
+
+        messageIdCounter++;
+        
+        Message memory newMessage = Message({
+            id: messageIdCounter,
+            sender: msg.sender,
+            recipient: _to,
+            content: _content,
+            timestamp: block.timestamp,
+            isRead: false
+        });
+
+        userMessages[_to].push(newMessage);
+        unreadMessageCount[_to]++;
+
+        emit MessageSent(messageIdCounter, msg.sender, _to, block.timestamp);
+    }
+
+    // Get unread message count
+    function getUnreadMessageCount() public view returns (uint256) {
+        return unreadMessageCount[msg.sender];
+    }
+
+    // Get all messages for the caller
+    function getMyMessages() public view returns (Message[] memory) {
+        return userMessages[msg.sender];
+    }
+
+    // Mark a message as read
+    function markMessageAsRead(uint256 _messageId) public {
+        Message[] storage messages = userMessages[msg.sender];
+        
+        for (uint i = 0; i < messages.length; i++) {
+            if (messages[i].id == _messageId && !messages[i].isRead) {
+                messages[i].isRead = true;
+                if (unreadMessageCount[msg.sender] > 0) {
+                    unreadMessageCount[msg.sender]--;
+                }
+                emit MessageRead(_messageId, msg.sender);
+                break;
+            }
+        }
+    }
+
+    // Get messages between current user and another user
+    function getMessagesWith(address _otherUser) public view returns (Message[] memory) {
+        Message[] memory allMessages = userMessages[msg.sender];
+        uint256 relevantCount = 0;
+
+        // Count relevant messages
+        for (uint i = 0; i < allMessages.length; i++) {
+            if (allMessages[i].sender == _otherUser || allMessages[i].recipient == _otherUser) {
+                relevantCount++;
+            }
+        }
+
+        // Create array of relevant messages
+        Message[] memory relevantMessages = new Message[](relevantCount);
+        uint256 currentIndex = 0;
+
+        for (uint i = 0; i < allMessages.length; i++) {
+            if (allMessages[i].sender == _otherUser || allMessages[i].recipient == _otherUser) {
+                relevantMessages[currentIndex] = allMessages[i];
+                currentIndex++;
+            }
+        }
+
+        return relevantMessages;
     }
 }
