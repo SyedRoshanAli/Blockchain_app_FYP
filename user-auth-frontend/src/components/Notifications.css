@@ -1,0 +1,130 @@
+.notifications-container {
+    max-width: 600px;
+    margin: 20px auto;
+    padding: 20px;
+    background: var(--background);
+    border-radius: 12px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.notifications-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border-color);
+    margin-bottom: 16px;
+}
+
+.notifications-header h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    font-size: 1.5rem;
+}
+
+.notification-badge {
+    background: var(--primary-color);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.8rem;
+}
+
+.notifications-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.notification-item {
+    padding: 16px;
+    background: var(--card-background);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    transition: all 0.2s ease;
+}
+
+.notification-item.unread {
+    background: var(--hover-background);
+    border-color: var(--primary-color);
+}
+
+.notification-content {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.notification-icon {
+    padding: 8px;
+    background: var(--primary-color);
+    border-radius: 50%;
+    color: white;
+}
+
+.notification-details {
+    flex: 1;
+}
+
+.notification-message {
+    margin: 0 0 4px 0;
+    font-size: 0.95rem;
+    line-height: 1.4;
+}
+
+.notification-message strong {
+    font-weight: 600;
+    color: var(--primary-color);
+}
+
+.notification-time {
+    font-size: 0.8rem;
+    color: var(--secondary-text);
+}
+
+.mark-read-button {
+    background: none;
+    border: none;
+    padding: 4px;
+    cursor: pointer;
+    color: var(--secondary-text);
+    transition: color 0.2s ease;
+}
+
+.mark-read-button:hover {
+    color: var(--primary-color);
+}
+
+.no-notifications {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--secondary-text);
+}
+
+.no-notifications svg {
+    margin-bottom: 12px;
+    opacity: 0.6;
+}
+
+.notifications-loading {
+    text-align: center;
+    padding: 20px;
+    color: var(--secondary-text);
+}
+
+.notifications-error {
+    text-align: center;
+    padding: 20px;
+    color: var(--error-color);
+}
+
+/* Dark mode support */
+:root[data-theme='dark'] .notification-item {
+    background: var(--dark-card-background);
+}
+
+:root[data-theme='dark'] .notification-item.unread {
+    background: var(--dark-hover-background);
+} 

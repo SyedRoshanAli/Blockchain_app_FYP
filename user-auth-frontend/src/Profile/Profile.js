@@ -34,6 +34,7 @@ import "./Profile.css";
 import { toast } from "react-hot-toast";
 import { format } from 'date-fns';
 import { ethers } from 'ethers';
+import { messageService } from '../services/messageService';
 
 function ProfilePage() {
     const [userData, setUserData] = useState(null);
@@ -54,6 +55,7 @@ function ProfilePage() {
     const [activeDropdown, setActiveDropdown] = useState(null);
     const [hiddenTweets, setHiddenTweets] = useState([]);
     const [showHiddenTweets, setShowHiddenTweets] = useState(false);
+    const [unreadMessages, setUnreadMessages] = useState(0);
     const navigate = useNavigate();
 
     useEffect(() => {
@@ -65,6 +67,27 @@ function ProfilePage() {
         if (savedDarkMode) {
             document.documentElement.classList.add('dark-mode');
         }
+        fetchUnreadCount();
+    }, []);
+
+    useEffect(() => {
+        // Set up message listener
+        const setupMessageListener = async () => {
+            await messageService.onNewMessage(() => {
+                console.log('New message received, updating count');
+                fetchUnreadCount();
+            });
+        };
+
+        setupMessageListener();
+        fetchUnreadCount();
+
+        // Check for new messages every 30 seconds
+        const interval = setInterval(fetchUnreadCount, 30000);
+
+        return () => {
+            clearInterval(interval);
+        };
     }, []);
 
     const fetchUserData = async () => {
@@ -185,6 +208,25 @@ function ProfilePage() {
             setErrorMessage("Failed to load your posts. Please try again later.");
         } finally {
             setLoading(false);
+        }
+    };
+
+    const fetchUnreadCount = async () => {
+        try {
+            const accounts = await window.ethereum.request({
+                method: "eth_requestAccounts"
+            });
+            
+            // Get all messages
+            const messages = await messageService.getAllMessages();
+            
+            // Count unread messages
+            const unreadCount = messages.filter(msg => !msg.isRead).length;
+            console.log('Unread messages count:', unreadCount);
+            
+            setUnreadMessages(unreadCount);
+        } catch (error) {
+            console.error('Error fetching unread messages:', error);
         }
     };
 
@@ -347,6 +389,12 @@ function ProfilePage() {
         navigate('/home');
     };
 
+    const handleNotification = (e) => {
+        e.preventDefault();
+        fetchUnreadCount(); // Refresh count when clicking notification icon
+        navigate('/notifications');
+    };
+
     if (loading) {
         return <div className={`soft-ui-container ${darkMode ? 'dark-mode' : ''}`}>Loading profile...</div>;
     }
@@ -388,9 +436,12 @@ function ProfilePage() {
                             </a>
                         </li>
                         <li>
-                            <a href="/notifications">
+                            <a href="/notifications" onClick={handleNotification}>
                                 <Bell size={20} />
                                 <span>Notifications</span>
+                                {unreadMessages > 0 && (
+                                    <span className="notification-badge">{unreadMessages}</span>
+                                )}
                             </a>
                         </li>
                         <li>
