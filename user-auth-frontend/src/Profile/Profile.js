@@ -217,16 +217,14 @@ function ProfilePage() {
                 method: "eth_requestAccounts"
             });
             
-            // Get all messages
-            const messages = await messageService.getAllMessages();
-            
-            // Count unread messages
-            const unreadCount = messages.filter(msg => !msg.isRead).length;
-            console.log('Unread messages count:', unreadCount);
-            
-            setUnreadMessages(unreadCount);
+            // Get unread count from contract
+            const count = await UserAuthContract.methods
+                .getUnreadMessageCount()
+                .call({ from: accounts[0] });
+                
+            setUnreadMessages(Number(count));
         } catch (error) {
-            console.error('Error fetching unread messages:', error);
+            console.error('Error fetching unread count:', error);
         }
     };
 
@@ -440,7 +438,9 @@ function ProfilePage() {
                                 <Bell size={20} />
                                 <span>Notifications</span>
                                 {unreadMessages > 0 && (
-                                    <span className="notification-badge">{unreadMessages}</span>
+                                    <span className="notification-badge">
+                                        {unreadMessages}
+                                    </span>
                                 )}
                             </a>
                         </li>
@@ -810,7 +810,7 @@ function ProfilePage() {
                                 </div>
                                 <div className="post-user-info">
                                     <span className="post-username">{userData?.username || "Unknown User"}</span>
-                                    <span className="post-time">{selectedPost.timestamp}</span>
+                                    <span className="post-time">{formatDate(selectedPost.timestamp)}</span>
                                 </div>
                             </div>
                             <h4 className="post-title">{selectedPost.title}</h4>
@@ -877,13 +877,20 @@ function ProfilePage() {
     );
 }
 
-const formatDate = (date) => {
-    if (!date) return 'N/A';
-    try {
-        return format(new Date(date), 'MM/dd/yyyy');
-    } catch (error) {
-        return 'Invalid Date';
-    }
+const formatDate = (timestamp) => {
+    const date = new Date(timestamp);
+    
+    // Get date
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const year = date.getFullYear();
+    
+    // Get time
+    const hours = date.getHours().toString().padStart(2, '0');
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    
+    // Format: DD/MM/YYYY HH:MM
+    return `${day}/${month}/${year} ${hours}:${minutes}`;
 };
 
 const processString = (str) => {

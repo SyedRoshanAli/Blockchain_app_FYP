@@ -1,15 +1,53 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Send, Smile, Image, Paperclip } from 'lucide-react';
 import { messageService } from '../services/messageService';
 import { UserAuthContract } from "../UserAuth";
 import { toast } from 'react-hot-toast';
+import { format } from 'date-fns';
 import './MessageModal.css';
 
 const MessageModal = ({ isOpen, onClose, recipient }) => {
     const [message, setMessage] = useState('');
     const [sending, setSending] = useState(false);
+    const [messageHistory, setMessageHistory] = useState([]);
+    const [loading, setLoading] = useState(true);
 
-    if (!isOpen) return null;
+    useEffect(() => {
+        if (isOpen && recipient) {
+            fetchMessageHistory();
+        }
+    }, [isOpen, recipient]);
+
+    const fetchMessageHistory = async () => {
+        try {
+            setLoading(true);
+            
+            // Get recipient's address from username
+            const recipientAddress = await UserAuthContract.methods
+                .getAddressByUsername(recipient)
+                .call();
+
+            // Get message history
+            const messages = await messageService.getMessagesWith(recipientAddress);
+            
+            // Format messages with timestamps
+            const formattedMessages = messages.map(msg => ({
+                ...msg,
+                timestamp: Number(msg.timestamp) * 1000,
+                isSender: msg.sender.toLowerCase() === (window.ethereum.selectedAddress || '').toLowerCase()
+            }));
+
+            // Sort messages by timestamp
+            const sortedMessages = formattedMessages.sort((a, b) => a.timestamp - b.timestamp);
+            
+            setMessageHistory(sortedMessages);
+        } catch (error) {
+            console.error('Error fetching message history:', error);
+            toast.error('Failed to load message history');
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -18,54 +56,37 @@ const MessageModal = ({ isOpen, onClose, recipient }) => {
         try {
             setSending(true);
             
-            // Get current user's address
             const accounts = await window.ethereum.request({
                 method: "eth_requestAccounts"
             });
             const currentUserAddress = accounts[0];
 
-            // Get recipient's address from username
             const recipientAddress = await UserAuthContract.methods
                 .getAddressByUsername(recipient)
                 .call();
 
-            // Debug logs
-            console.log('Current user address:', currentUserAddress);
-            console.log('Recipient address:', recipientAddress);
-            console.log('Recipient username:', recipient);
-            console.log('Are addresses equal?', currentUserAddress.toLowerCase() === recipientAddress.toLowerCase());
-
-            // Check if sending to self
             if (currentUserAddress.toLowerCase() === recipientAddress.toLowerCase()) {
-                toast.error(`You are currently logged in as ${recipient}. Please switch accounts to send a message to this user.`);
-                setSending(false);
+                toast.error(`You cannot send a message to yourself`);
                 return;
             }
 
-            console.log('Proceeding to send message:', {
-                from: currentUserAddress,
-                to: recipientAddress,
-                recipient: recipient,
-                message: message.trim()
-            });
-
-            // Send message using messageService
+            // Send message
             await messageService.sendMessage(recipientAddress, message.trim());
+            
+            // Refresh message history
+            await fetchMessageHistory();
             
             toast.success(`Message sent to ${recipient}`);
             setMessage('');
-            onClose();
         } catch (error) {
-            console.error('Error details:', error);
-            if (error.message.includes('Cannot send message to yourself')) {
-                toast.error(`You are currently logged in as ${recipient}. Please switch accounts to send a message to this user.`);
-            } else {
-                toast.error('Failed to send message: ' + (error.message || 'Unknown error'));
-            }
+            console.error('Error sending message:', error);
+            toast.error('Failed to send message: ' + (error.message || 'Unknown error'));
         } finally {
             setSending(false);
         }
     };
+
+    if (!isOpen) return null;
 
     return (
         <div className="message-modal-overlay">
@@ -87,12 +108,25 @@ const MessageModal = ({ isOpen, onClose, recipient }) => {
                 
                 <div className="message-content">
                     <div className="message-history">
-                        <div className="message-date-divider">
-                            <span>Today</span>
-                        </div>
-                        <div className="message-bubble system">
-                            Start your conversation with {recipient}
-                        </div>
+                        {loading ? (
+                            <div className="loading-messages">Loading messages...</div>
+                        ) : messageHistory.length === 0 ? (
+                            <div className="message-bubble system">
+                                Start your conversation with {recipient}
+                            </div>
+                        ) : (
+                            messageHistory.map((msg, index) => (
+                                <div 
+                                    key={msg.id || index}
+                                    className={`message-bubble ${msg.isSender ? 'sent' : 'received'}`}
+                                >
+                                    <p>{msg.content || msg.message}</p>
+                                    <span className="message-time">
+                                        {format(new Date(msg.timestamp), 'h:mm a')}
+                                    </span>
+                                </div>
+                            ))
+                        )}
                     </div>
                 </div>
 

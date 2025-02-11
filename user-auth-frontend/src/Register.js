@@ -52,6 +52,79 @@ const NavButton = styled("a")({
     fontSize: "14px",
 });
 
+// Add these validation functions at the top of your component
+const validateUsername = (username) => {
+    // Updated regex to allow spaces between words but require at least one letter
+    const usernameRegex = /^[a-zA-Z0-9][a-zA-Z0-9\s_]{2,19}$/;
+    const containsLetterRegex = /[a-zA-Z]/;
+    
+    if (!username) return "Username is required";
+    
+    // Trim spaces from start and end
+    const trimmedUsername = username.trim();
+    
+    // Check if username is too short after trimming
+    if (trimmedUsername.length < 3) return "Username must be at least 3 characters";
+    
+    // Check if username is too long
+    if (trimmedUsername.length > 20) return "Username cannot exceed 20 characters";
+    
+    // Check if username matches basic pattern
+    if (!usernameRegex.test(username)) {
+        return "Username must start with a letter or number and can contain letters, numbers, spaces, and underscores";
+    }
+    
+    // Check for multiple consecutive spaces
+    if (/\s\s/.test(username)) {
+        return "Username cannot contain consecutive spaces";
+    }
+    
+    // Check if username contains at least one letter
+    if (!containsLetterRegex.test(username)) {
+        return "Username must contain at least one letter";
+    }
+    
+    return "";
+};
+
+const validateEmail = (email) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!email) return "Email is required";
+    if (!emailRegex.test(email)) return "Please enter a valid email address";
+    return "";
+};
+
+const validatePassword = (password) => {
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
+    if (!password) return "Password is required";
+    if (!passwordRegex.test(password)) {
+        return "Password must be at least 8 characters and contain at least one uppercase letter, one lowercase letter, one number, and one special character";
+    }
+    return "";
+};
+
+const validatePhoneNumber = (number) => {
+    const phoneRegex = /^\d{10}$/;
+    if (!number) return "Phone number is required";
+    if (!phoneRegex.test(number)) return "Please enter a valid 10-digit phone number";
+    return "";
+};
+
+const validateDOB = (dob) => {
+    if (!dob) return "Date of birth is required";
+    const birthDate = new Date(dob);
+    const today = new Date();
+    const age = today.getFullYear() - birthDate.getFullYear();
+    if (age < 13) return "You must be at least 13 years old to register";
+    if (age > 100) return "Please enter a valid date of birth";
+    return "";
+};
+
+const validateGender = (gender) => {
+    if (!gender) return "Gender is required";
+    return "";
+};
+
 // Register Component
 const Register = () => {
     const navigate = useNavigate();
@@ -71,22 +144,48 @@ const Register = () => {
     const handleInputChange = (e) => {
         const { name, value } = e.target;
         setFormData({ ...formData, [name]: value });
-        setErrors({ ...errors, [name]: false });
+        
+        // Validate field on change
+        let error = "";
+        switch (name) {
+            case "username":
+                error = validateUsername(value);
+                break;
+            case "email":
+                error = validateEmail(value);
+                break;
+            case "password":
+                error = validatePassword(value);
+                break;
+            case "number":
+                error = validatePhoneNumber(value);
+                break;
+            case "dob":
+                error = validateDOB(value);
+                break;
+            case "gender":
+                error = validateGender(value);
+                break;
+            default:
+                break;
+        }
+        
+        setErrors(prev => ({ ...prev, [name]: error }));
     };
 
     // Validate Inputs
     const validateInputs = () => {
         const newErrors = {
-            username: formData.username.trim() === "",
-            email: formData.email.trim() === "",
-            password: formData.password.trim() === "",
-            number: formData.number.trim() === "",
-            gender: formData.gender === "",
-            dob: formData.dob === "",
+            username: validateUsername(formData.username),
+            email: validateEmail(formData.email),
+            password: validatePassword(formData.password),
+            number: validatePhoneNumber(formData.number),
+            gender: validateGender(formData.gender),
+            dob: validateDOB(formData.dob)
         };
 
         setErrors(newErrors);
-        return !Object.values(newErrors).some((val) => val);
+        return !Object.values(newErrors).some(error => error !== "");
     };
 
     // Handle Form Submission
@@ -237,12 +336,17 @@ const Register = () => {
                                 type={field === "password" ? "password" : field === "dob" ? "date" : "text"}
                                 value={formData[field]}
                                 onChange={handleInputChange}
-                                error={errors[field]}
-                                helperText={errors[field] && `${field} is required`}
+                                error={Boolean(errors[field])}
+                                helperText={errors[field]}
                                 variant="outlined"
                                 margin="normal"
                                 fullWidth
                                 size="small"
+                                InputProps={{
+                                    inputProps: {
+                                        max: field === "dob" ? new Date().toISOString().split("T")[0] : undefined
+                                    }
+                                }}
                             />
                         </Box>
                     ))}
@@ -255,8 +359,8 @@ const Register = () => {
                             select
                             value={formData.gender}
                             onChange={handleInputChange}
-                            error={errors.gender}
-                            helperText={errors.gender && "Gender is required"}
+                            error={Boolean(errors.gender)}
+                            helperText={errors.gender}
                             variant="outlined"
                             margin="normal"
                             fullWidth

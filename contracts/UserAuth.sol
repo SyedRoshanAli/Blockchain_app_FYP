@@ -34,6 +34,9 @@ contract UserAuth {
     mapping(address => uint256) private unreadMessageCount;
     uint256 private messageIdCounter;
 
+    // New mapping for IPFS hashes
+    mapping(address => string[]) private userIpfsHashes;
+
     // Events
     event UserRegistered(string username, string ipfsHash, address userAddress);
     event UserUpdated(string username, string newIpfsHash, address userAddress);
@@ -68,6 +71,9 @@ contract UserAuth {
         
         // Mark username as taken
         usernameExists[_username] = true;
+
+        // Store the IPFS hash
+        userIpfsHashes[msg.sender].push(_ipfsHash);
 
         // Create new user
         users[msg.sender][_username] = User({
@@ -224,5 +230,38 @@ contract UserAuth {
         }
 
         return relevantMessages;
+    }
+
+    // Add this function to get user's IPFS hashes
+    function getUserHashes(address _userAddress) public view returns (string[] memory) {
+        return userIpfsHashes[_userAddress];
+    }
+
+    // Add this function to get all users' IPFS hashes
+    function getAllUserHashes() public view returns (string[] memory) {
+        uint256 totalHashes = 0;
+        
+        // Count total hashes
+        for(uint i = 0; i < allUsernames.length; i++) {
+            address userAddr = usernameToAddress[allUsernames[i]];
+            totalHashes += userIpfsHashes[userAddr].length;
+        }
+        
+        // Create array for all hashes
+        string[] memory allHashes = new string[](totalHashes);
+        uint256 currentIndex = 0;
+        
+        // Collect all hashes
+        for(uint i = 0; i < allUsernames.length; i++) {
+            address userAddr = usernameToAddress[allUsernames[i]];
+            string[] memory userHashes = userIpfsHashes[userAddr];
+            
+            for(uint j = 0; j < userHashes.length; j++) {
+                allHashes[currentIndex] = userHashes[j];
+                currentIndex++;
+            }
+        }
+        
+        return allHashes;
     }
 }

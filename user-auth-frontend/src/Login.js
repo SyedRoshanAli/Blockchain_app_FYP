@@ -57,7 +57,7 @@ const NavButton = styled("a")({
 // Login Component
 const Login = () => {
     const [formData, setFormData] = useState({
-        username: "",
+        email: "",
         password: "",
     });
     const [message, setMessage] = useState("");
@@ -83,39 +83,41 @@ const Login = () => {
                 method: "eth_requestAccounts",
             });
 
-            // First check if username exists
-            const isAvailable = await UserAuthContract.methods
-                .isUsernameAvailable(formData.username)
+            // Get all users' IPFS hashes
+            const allHashes = await UserAuthContract.methods
+                .getAllUserHashes()
                 .call();
 
-            if (isAvailable) {
-                throw new Error("Username not found. Please register first.");
+            let foundUser = null;
+
+            // Check each hash for matching email
+            for (const hash of allHashes) {
+                try {
+                    const response = await fetch(`http://127.0.0.1:8083/ipfs/${hash}`);
+                    if (!response.ok) continue;
+                    
+                    const userData = await response.json();
+                    if (userData.email === formData.email) {
+                        foundUser = userData;
+                        break;
+                    }
+                } catch (error) {
+                    console.error("Error fetching user data:", error);
+                    continue;
+                }
             }
 
-            // Get user's IPFS hash using the login function
-            const ipfsHash = await UserAuthContract.methods
-                .login(formData.username)
-                .call({ from: accounts[0] });
-
-            if (!ipfsHash) {
-                throw new Error("Failed to retrieve user data");
+            if (!foundUser) {
+                throw new Error("Email not found. Please register first.");
             }
-
-            // Fetch user data from IPFS
-            const response = await fetch(`http://127.0.0.1:8083/ipfs/${ipfsHash}`);
-            if (!response.ok) {
-                throw new Error("Failed to fetch user data");
-            }
-
-            const userData = await response.json();
 
             // Verify password
-            if (SHA256(formData.password).toString() === SHA256(userData.password).toString()) {
+            if (SHA256(formData.password).toString() === SHA256(foundUser.password).toString()) {
                 // Store user session
-                localStorage.setItem('userData', JSON.stringify(userData));
+                localStorage.setItem('userData', JSON.stringify(foundUser));
                 localStorage.setItem('userSession', JSON.stringify({
                     address: accounts[0],
-                    username: formData.username
+                    username: foundUser.username
                 }));
 
                 toast.success("Login successful!");
@@ -126,18 +128,17 @@ const Login = () => {
 
         } catch (error) {
             console.error("Error during login:", error);
-            // Check for specific contract error messages
-            if (error.message.includes("User not registered")) {
-                setMessage("This username is not registered with your account");
-            } else if (error.message.includes("Unauthorized access")) {
-                setMessage("This username belongs to a different account");
-            } else {
-                setMessage(error.message);
-            }
+            setMessage(error.message);
             toast.error(error.message);
         } finally {
             setLoading(false);
         }
+    };
+
+    // Email validation
+    const validateEmail = (email) => {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        return emailRegex.test(email);
     };
 
     return (
@@ -160,18 +161,25 @@ const Login = () => {
                 <LoginForm onSubmit={handleSubmit} noValidate>
                     <Box width="100%">
                         <Typography variant="subtitle1" gutterBottom>
-                            Username
+                            Email
                         </Typography>
                         <TextField
-                            name="username"
+                            name="email"
+                            type="email"
                             size="small"
                             variant="outlined"
                             margin="normal"
                             required
                             fullWidth
                             autoFocus
-                            value={formData.username}
+                            value={formData.email}
                             onChange={handleInputChange}
+                            error={formData.email && !validateEmail(formData.email)}
+                            helperText={
+                                formData.email && !validateEmail(formData.email)
+                                    ? "Please enter a valid email address"
+                                    : ""
+                            }
                         />
                     </Box>
                     <Box width="100%">
@@ -200,7 +208,7 @@ const Login = () => {
                         fullWidth
                         variant="contained"
                         sx={{ mt: 3, mb: 2 }}
-                        disabled={loading}
+                        disabled={loading || (formData.email && !validateEmail(formData.email))}
                     >
                         {loading ? "Signing In..." : "Sign In"}
                     </Button>

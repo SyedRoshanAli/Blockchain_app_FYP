@@ -1,8 +1,37 @@
 import { UserAuthContract } from "../UserAuth";
 import { toast } from 'react-hot-toast';
 import Web3 from 'web3';
+import { ethers } from 'ethers';
 
-export const messageService = {
+class MessageService {
+    constructor() {
+        this.contract = UserAuthContract;
+    }
+
+    async getAllMessages() {
+        try {
+            const accounts = await window.ethereum.request({
+                method: "eth_requestAccounts"
+            });
+            return await this.contract.methods.getMyMessages().call({ from: accounts[0] });
+        } catch (error) {
+            console.error("Error getting all messages:", error);
+            throw error;
+        }
+    }
+
+    async getMessagesWith(address) {
+        try {
+            const accounts = await window.ethereum.request({
+                method: "eth_requestAccounts"
+            });
+            return await this.contract.methods.getMessagesWith(address).call({ from: accounts[0] });
+        } catch (error) {
+            console.error("Error getting messages with address:", error);
+            throw error;
+        }
+    }
+
     async sendMessage(recipientAddress, content) {
         try {
             const accounts = await window.ethereum.request({
@@ -22,7 +51,7 @@ export const messageService = {
             });
 
             // Estimate gas first
-            const gasEstimate = await UserAuthContract.methods
+            const gasEstimate = await this.contract.methods
                 .sendMessage(recipientAddress, content)
                 .estimateGas({ from: accounts[0] });
 
@@ -37,7 +66,7 @@ export const messageService = {
             });
 
             // Send the transaction with explicit gas configuration
-            const result = await UserAuthContract.methods
+            const result = await this.contract.methods
                 .sendMessage(recipientAddress, content)
                 .send({ 
                     from: accounts[0],
@@ -68,65 +97,46 @@ export const messageService = {
             
             throw error;
         }
-    },
+    }
 
     async getUnreadCount() {
-        try {
-            const messages = await this.getAllMessages();
-            const unreadCount = messages.filter(msg => !msg.isRead).length;
-            console.log('Unread count:', unreadCount);
-            return unreadCount;
-        } catch (error) {
-            console.error("Error getting unread count:", error);
-            return 0;
-        }
-    },
-
-    async getAllMessages() {
         try {
             const accounts = await window.ethereum.request({
                 method: "eth_requestAccounts"
             });
-
-            const messages = await UserAuthContract.methods
-                .getMyMessages()
+            return await this.contract.methods.getUnreadMessageCount()
                 .call({ from: accounts[0] });
-
-            console.log('Retrieved messages:', messages);
-            return messages;
         } catch (error) {
-            console.error("Error getting messages:", error);
+            console.error("Error getting unread count:", error);
             throw error;
         }
-    },
+    }
 
     async markAsRead(messageId) {
         try {
             const accounts = await window.ethereum.request({
                 method: "eth_requestAccounts"
             });
-
-            await UserAuthContract.methods
-                .markMessageAsRead(messageId)
+            return await this.contract.methods.markMessageAsRead(messageId)
                 .send({ from: accounts[0] });
-
-            return true;
         } catch (error) {
             console.error("Error marking message as read:", error);
             throw error;
         }
-    },
+    }
 
     async onNewMessage(callback) {
         try {
-            UserAuthContract.events.NewMessage()
-                .on('data', async (event) => {
-                    console.log('New message received:', event);
-                    if (callback) callback();
+            this.contract.events.MessageSent({})
+                .on('data', (event) => {
+                    callback(event.returnValues);
                 })
                 .on('error', console.error);
         } catch (error) {
             console.error("Error setting up message listener:", error);
+            throw error;
         }
     }
-}; 
+}
+
+export const messageService = new MessageService(); 

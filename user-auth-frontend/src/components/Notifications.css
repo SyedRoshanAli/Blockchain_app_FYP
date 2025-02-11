@@ -1,35 +1,28 @@
 .notifications-container {
-    max-width: 600px;
-    margin: 20px auto;
+    max-width: 800px;
+    margin: 0 auto;
     padding: 20px;
-    background: var(--background);
-    border-radius: 12px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    background: var(--bg-primary);
+    min-height: 100vh;
 }
 
 .notifications-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding-bottom: 16px;
+    padding: 16px 0;
     border-bottom: 1px solid var(--border-color);
-    margin-bottom: 16px;
+    margin-bottom: 20px;
 }
 
 .notifications-header h2 {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 12px;
+    font-size: 24px;
+    color: var(--text-primary);
     margin: 0;
-    font-size: 1.5rem;
 }
 
-.notification-badge {
-    background: var(--primary-color);
-    color: white;
-    padding: 2px 8px;
-    border-radius: 12px;
-    font-size: 0.8rem;
+.bell-icon {
+    color: var(--primary-color);
 }
 
 .notifications-list {
@@ -40,72 +33,111 @@
 
 .notification-item {
     padding: 16px;
-    background: var(--card-background);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
+    background: var(--bg-secondary);
+    border-radius: 12px;
     transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.notification-item:hover {
+    background: var(--bg-highlight);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .notification-item.unread {
-    background: var(--hover-background);
-    border-color: var(--primary-color);
+    background: var(--bg-highlight);
+    border-left: 4px solid var(--primary-color);
 }
 
 .notification-content {
     display: flex;
     align-items: flex-start;
-    gap: 12px;
+    gap: 16px;
+    position: relative;
 }
 
 .notification-icon {
     padding: 8px;
-    background: var(--primary-color);
+    background: var(--icon-bg);
     border-radius: 50%;
-    color: white;
+    color: var(--primary-color);
 }
 
 .notification-details {
     flex: 1;
 }
 
-.notification-message {
-    margin: 0 0 4px 0;
-    font-size: 0.95rem;
-    line-height: 1.4;
+.notification-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
 }
 
-.notification-message strong {
+.notification-sender {
     font-weight: 600;
-    color: var(--primary-color);
+    color: var(--text-primary);
 }
 
 .notification-time {
-    font-size: 0.8rem;
-    color: var(--secondary-text);
+    font-size: 0.875rem;
+    color: var(--text-secondary);
 }
 
-.mark-read-button {
-    background: none;
-    border: none;
-    padding: 4px;
-    cursor: pointer;
-    color: var(--secondary-text);
-    transition: color 0.2s ease;
-}
-
-.mark-read-button:hover {
-    color: var(--primary-color);
+.notification-message {
+    color: var(--text-primary);
+    margin: 0;
+    line-height: 1.5;
 }
 
 .no-notifications {
     text-align: center;
-    padding: 40px 20px;
-    color: var(--secondary-text);
+    padding: 48px 20px;
+    color: var(--text-secondary);
 }
 
 .no-notifications svg {
-    margin-bottom: 12px;
-    opacity: 0.6;
+    color: var(--text-secondary);
+    opacity: 0.5;
+    margin-bottom: 16px;
+}
+
+.no-notifications p {
+    font-size: 18px;
+    margin: 8px 0;
+    color: var(--text-primary);
+}
+
+.no-notifications-subtitle {
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+
+/* Dark mode variables */
+:root {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8f9fa;
+    --bg-highlight: #f0f4ff;
+    --text-primary: #1a1a1a;
+    --text-secondary: #666666;
+    --border-color: #e0e0e0;
+    --primary-color: #6772e5;
+    --icon-bg: #eef2ff;
+    --hover-bg: rgba(103, 114, 229, 0.1);
+}
+
+/* Dark mode overrides */
+[data-theme='dark'] {
+    --bg-primary: #1a1f2c;
+    --bg-secondary: #242c3d;
+    --bg-highlight: #2a3548;
+    --text-primary: #ffffff;
+    --text-secondary: #a0aec0;
+    --border-color: #2d3748;
+    --primary-color: #818cf8;
+    --icon-bg: rgba(129, 140, 248, 0.2);
+    --hover-bg: rgba(129, 140, 248, 0.1);
 }
 
 .notifications-loading {

@@ -3,8 +3,8 @@ import UserAuthABI from "./artifacts/UserAuth.json"; // Path to UserAuth ABI
 import CreatePostABI from "./artifacts/CreatePost.json"; // Path to CreatePost ABI
 
 // Deployed contract addresses
-const userAuthAddress = "0x133d93BEf8f74d0329Ad32279f337Bc780805D6F"; // UserAuth address
-const createPostAddress = "0x248faEB85D9c4808031aD7813137489d1981d296"; // CreatePost address
+const userAuthAddress = "0xCB216DA1Bdb7F4D127282ADDb436A99BF236D5E0"; // UserAuth address
+const createPostAddress = "0x4907bf9b75bD2447bD140bD8c14259F152abeC9b"; // CreatePost address
 
 // Web3 setup
 const web3 = new Web3(Web3.givenProvider || "http://localhost:7545");
@@ -356,6 +356,89 @@ const UserAuthContract = new web3.eth.Contract([
         ],
         "name": "MessageRead",
         "type": "event"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "_userAddress",
+                "type": "address"
+            }
+        ],
+        "name": "getUserHashes",
+        "outputs": [
+            {
+                "internalType": "string[]",
+                "name": "",
+                "type": "string[]"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "getAllUserHashes",
+        "outputs": [
+            {
+                "internalType": "string[]",
+                "name": "",
+                "type": "string[]"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {
+                "internalType": "address",
+                "name": "_otherUser",
+                "type": "address"
+            }
+        ],
+        "name": "getMessagesWith",
+        "outputs": [
+            {
+                "components": [
+                    {
+                        "internalType": "uint256",
+                        "name": "id",
+                        "type": "uint256"
+                    },
+                    {
+                        "internalType": "address",
+                        "name": "sender",
+                        "type": "address"
+                    },
+                    {
+                        "internalType": "address",
+                        "name": "recipient",
+                        "type": "address"
+                    },
+                    {
+                        "internalType": "string",
+                        "name": "content",
+                        "type": "string"
+                    },
+                    {
+                        "internalType": "uint256",
+                        "name": "timestamp",
+                        "type": "uint256"
+                    },
+                    {
+                        "internalType": "bool",
+                        "name": "isRead",
+                        "type": "bool"
+                    }
+                ],
+                "internalType": "struct UserAuth.Message[]",
+                "name": "",
+                "type": "tuple[]"
+            }
+        ],
+        "stateMutability": "view",
+        "type": "function"
     }
 ], userAuthAddress);
 const CreatePostContract = new web3.eth.Contract(CreatePostABI.abi, createPostAddress);
