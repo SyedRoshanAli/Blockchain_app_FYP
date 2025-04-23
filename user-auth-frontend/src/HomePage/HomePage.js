@@ -20,11 +20,28 @@ import {
     LogOut,
     Moon,
     Sun,
-    Eye
+    Eye,
+    Mail,
+    Plus,
+    MoreHorizontal,
+    Calendar,
+    Image,
+    Link as LinkIcon,
+    File,
+    Repeat,
+    Send
 } from 'lucide-react';
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { toast } from "react-hot-toast";
 import './HomePage.css';
+import LogoImage from '../logo.png';
+import { cleanupFollowRequests } from '../utils/cleanupStorage';
+import { messageService } from '../services/messageService';
+import { getFromIPFS } from '../ipfs';
+import PostModal from '../components/PostModal';
+import { FollowRelationshipContract } from '../UserAuth';
+import { notificationService } from '../services/notificationService';
+import NotificationBadge from '../components/Notifications/NotificationBadge';
 
 const HomePage = () => {
     const [posts, setPosts] = useState([]);
@@ -35,73 +52,201 @@ const HomePage = () => {
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState([]);
     const [isSearching, setIsSearching] = useState(false);
+    const [userData, setUserData] = useState(null);
+    const [recommendedUsers, setRecommendedUsers] = useState([]);
+    const [followRequestCount, setFollowRequestCount] = useState(0);
+    const [animateContent, setAnimateContent] = useState(false);
+    const [unreadMessages, setUnreadMessages] = useState(0);
+    const [messagesDropdownOpen, setMessagesDropdownOpen] = useState(false);
+    const [recentMessages, setRecentMessages] = useState([]);
+    const [selectedPost, setSelectedPost] = useState(null);
+    const [notificationCount, setNotificationCount] = useState(0);
+    const [userStats, setUserStats] = useState({
+        posts: 0,
+        followers: 0,
+        following: 0
+    });
     const navigate = useNavigate();
 
     useEffect(() => {
+        // Clean up storage first
+        cleanupFollowRequests();
+        
         fetchAllPosts();
+        checkFollowRequests();
+        
         // Load dark mode preference from localStorage
         const savedDarkMode = localStorage.getItem('darkMode') === 'true';
         setDarkMode(savedDarkMode);
         if (savedDarkMode) {
             document.documentElement.classList.add('dark-mode');
         }
+
+        // Get user data from localStorage
+        const storedData = localStorage.getItem("userData");
+        if (storedData) {
+            setUserData(JSON.parse(storedData));
+        }
+
+        fetchRecommendedUsers();
+
+        // Set up interval to check for new requests
+        const interval = setInterval(checkFollowRequests, 30000); // Check every 30 seconds
+        
+        // Add animations
+        setTimeout(() => {
+            setAnimateContent(true);
+        }, 100);
+        
+        // Fetch unread message count
+        const fetchUnreadCount = async () => {
+            try {
+                const count = await messageService.getUnreadCount();
+                setUnreadMessages(Number(count));
+                
+                if (Number(count) > 0) {
+                    // Fetch recent messages for preview
+                    const allMessages = await messageService.getAllMessages();
+                    const unreadMsgs = allMessages.filter(msg => !msg.isRead && msg.sender !== window.ethereum.selectedAddress);
+                    
+                    // Get usernames for senders
+                    const messagesWithUsernames = await Promise.all(
+                        unreadMsgs.slice(0, 3).map(async (msg) => {
+                            const usernames = await UserAuthContract.methods
+                                .getUsernames(msg.sender)
+                                .call();
+                            
+                            return {
+                                ...msg,
+                                senderName: usernames[0] || 'Unknown User',
+                                timestamp: Number(msg.timestamp) * 1000
+                            };
+                        })
+                    );
+                    
+                    // Sort by most recent first
+                    messagesWithUsernames.sort((a, b) => b.timestamp - a.timestamp);
+                    
+                    setRecentMessages(messagesWithUsernames);
+                }
+            } catch (error) {
+                console.error("Error fetching unread count:", error);
+            }
+        };
+        
+        fetchUnreadCount();
+        
+        // Set up interval to check for new messages
+        const messageInterval = setInterval(fetchUnreadCount, 30000); // Check every 30 seconds
+        
+        // Check for notifications initially and set up interval
+        const notificationCount = checkNotifications();
+        setNotificationCount(notificationCount);
+        
+        const notificationInterval = setInterval(() => {
+            const count = checkNotifications();
+            setNotificationCount(count);
+        }, 30000); // Check every 30 seconds
+        
+        return () => {
+            clearInterval(interval);
+            clearInterval(messageInterval);
+            clearInterval(notificationInterval);
+        };
     }, []);
 
+    useEffect(() => {
+        if (userData) {
+            const fetchStats = async () => {
+                const stats = await getUserStats();
+                setUserStats(stats);
+            };
+            fetchStats();
+        }
+    }, [userData]);
+
     const fetchAllPosts = async () => {
+        setLoading(true);
+        
         try {
             const accounts = await window.ethereum.request({
-                method: "eth_requestAccounts"
+                method: "eth_requestAccounts",
             });
-
-            // Get total posts from postCounter
-            const totalPosts = await CreatePostContract.methods
-                .postCounter()
-                .call();
-
-            console.log("Total posts:", totalPosts);
-
-            // Create an array from 1 to totalPosts (since your counter starts from 1)
+            
+            // Get post count
+            const postCount = await CreatePostContract.methods.postCounter().call();
+            
+            // Create an array of post IDs from 1 to postCount
             const postIds = Array.from(
-                { length: Number(totalPosts) }, 
+                { length: parseInt(postCount) }, 
                 (_, i) => i + 1
-            );
-
-            // Fetch all posts
-            const allPosts = await Promise.all(
-                postIds.map(async (postId) => {
-                    try {
-                        const post = await CreatePostContract.methods
+            ).reverse(); // Newest first
+            
+            // Get current user's address
+            const currentAddress = accounts[0].toLowerCase();
+            
+            // Get liked posts from localStorage
+            const likedPosts = JSON.parse(localStorage.getItem('likedPosts') || '{}');
+            const userLikedPosts = likedPosts[currentAddress] || [];
+            
+            const fetchedPosts = [];
+            const creatorAddresses = new Set(); // To collect unique creator addresses
+            
+            // Fetch posts details for each ID
+            for (const postId of postIds) {
+                try {
+                    const postDetails = await CreatePostContract.methods
                             .getPost(postId)
                             .call();
 
-                        // Fetch post data from IPFS
-                        const response = await fetch(`http://127.0.0.1:8083/ipfs/${post.contentHash}`);
-                        if (!response.ok) throw new Error('Failed to fetch post data');
-                        
-                        const postData = await response.json();
-                        return {
-                            id: post.postId,
-                            creator: post.creator,
-                            ipfsHash: post.contentHash,
-                            timestamp: new Date(Number(post.timestamp) * 1000).toISOString(),
-                            ...postData
-                        };
-                    } catch (error) {
-                        console.error(`Error fetching post ${postId}:`, error);
-                        return null;
+                    // Explicitly fetch likes for this post from the blockchain
+                    const likes = await CreatePostContract.methods
+                        .getPostLikes(postId)
+                        .call();
+                    
+                    // Check if user's address is in the post's likes array OR in localStorage
+                    const isLikedByMe = userLikedPosts.includes(postId.toString()) || 
+                                        likes.some(addr => addr.toLowerCase() === currentAddress);
+                    
+                    // Format post data
+                    const post = {
+                        id: postDetails.postId,
+                        creator: postDetails.creator,
+                        contentHash: postDetails.contentHash,
+                        timestamp: parseInt(postDetails.timestamp) * 1000, // Convert to ms
+                        hasMedia: postDetails.hasMedia,
+                        tags: postDetails.tags,
+                        likes: likes,
+                        isLikedByMe: isLikedByMe
+                    };
+                    
+                    fetchedPosts.push(post);
+                    creatorAddresses.add(postDetails.creator); // Add to set for username fetching
+                } catch (err) {
+                    console.error(`Error fetching post ${postId}:`, err);
+                }
+            }
+            
+            // Fetch usernames for all creators
+            const addressesArray = [...creatorAddresses];
+            for (const address of addressesArray) {
+                try {
+                    const usernames = await UserAuthContract.methods
+                        .getUsernames(address)
+                        .call();
+                    
+                    if (usernames && usernames.length > 0) {
+                        localStorage.setItem(`usernames_${address.toLowerCase()}`, JSON.stringify(usernames));
                     }
-                })
-            );
-
-            // Filter out any null posts and sort by timestamp
-            const validPosts = allPosts
-                .filter(post => post !== null)
-                .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-
-            setPosts(validPosts);
+                } catch (err) {
+                    console.error(`Error fetching username for ${address}:`, err);
+                }
+            }
+            
+            setPosts(fetchedPosts);
         } catch (error) {
             console.error("Error fetching posts:", error);
-            setError("Failed to load posts. Please try again later.");
+            toast.error("Failed to load posts");
         } finally {
             setLoading(false);
         }
@@ -125,318 +270,1525 @@ const HomePage = () => {
         localStorage.removeItem("userSession");
         localStorage.removeItem("darkMode");
         navigate("/login");
-    };
-
-    const handleHiddenTweetsClick = (e) => {
-        e.preventDefault();
-        // Implement hidden tweets functionality if needed
-    };
-
-    const handleHomeClick = (e) => {
-        e.preventDefault();
-        navigate('/home');
+        toast.success("Logged out successfully");
     };
 
     const handleSearch = async (e) => {
+        try {
+            setIsSearching(true);
         const query = e.target.value;
-        setSearchQuery(query);
+            setSearchQuery(query); // Make sure to update the search query state
 
-        if (!query.trim()) {
+            if (query.trim() === '') {
             setSearchResults([]);
+                setIsSearching(false);
             return;
         }
 
-        setIsSearching(true);
-        try {
-            const allUsernames = await UserAuthContract.methods
-                .getAllUsernames()
-                .call();
-
-            const searchResults = allUsernames
-                .filter(username => 
-                    username.toLowerCase().includes(query.toLowerCase())
-                )
-                .map(async (username) => {
-                    const address = await UserAuthContract.methods
-                        .getAddressByUsername(username)
-                        .call();
-                    return {
-                        username,
-                        address
-                    };
-                });
-
-            const resolvedResults = await Promise.all(searchResults);
-            setSearchResults(resolvedResults);
+            const accounts = await window.ethereum.request({
+                method: "eth_requestAccounts"
+            });
+            
+            // Get all registered usernames
+            const usernames = await UserAuthContract.methods.getAllUsernames().call();
+            
+            // Filter usernames that match the search query
+            const filteredUsernames = usernames.filter(username => 
+                username && username.toLowerCase().includes(query.toLowerCase())
+            );
+            
+            // Get current user's username to filter out
+            const currentUsername = localStorage.getItem('username');
+            
+            // Filter out the current user and remove duplicates by creating a Set
+            const uniqueUsernames = [...new Set(filteredUsernames)].filter(
+                username => username && username !== currentUsername
+            );
+            
+            // Prepare search results with user data
+            const results = await Promise.all(
+                uniqueUsernames.map(async (username) => {
+                    try {
+                        const address = await UserAuthContract.methods.getAddressByUsername(username).call();
+                        return { username, address };
+                    } catch (error) {
+                        console.error(`Error fetching address for ${username}:`, error);
+                        return null;
+                    }
+                })
+            );
+            
+            // Filter out any null results
+            const validResults = results.filter(result => result !== null);
+            
+            setSearchResults(validResults);
         } catch (error) {
-            console.error("Error searching users:", error);
-            toast.error("Failed to search users");
+            console.error('Error searching users:', error);
+            setSearchResults([]);
         } finally {
             setIsSearching(false);
         }
     };
 
+    const handleCreatePost = () => {
+        navigate("/createpost");
+    };
+
+    const handleProfileClick = () => {
+        navigate("/profile");
+    };
+
+    const fetchRecommendedUsers = async () => {
+        try {
+        setIsSearching(true);
+            
+            // Get current MetaMask account
+            const accounts = await window.ethereum.request({
+                method: "eth_requestAccounts"
+            });
+            const currentAccount = accounts[0];
+            
+            // Get all registered usernames
+            const usernames = await UserAuthContract.methods.getAllUsernames().call();
+            
+            // Get current user's username from localStorage
+            const userSession = JSON.parse(localStorage.getItem('userSession') || '{}');
+            const userData = JSON.parse(localStorage.getItem('userData') || '{}');
+            const currentUsername = userSession.username || userData.username || localStorage.getItem('username');
+            
+            console.log("Current username:", currentUsername);
+            
+            // Get current user's following list from blockchain
+            let followingAddresses = [];
+            try {
+                followingAddresses = await FollowRelationshipContract.methods
+                    .getFollowing(currentAccount)
+                .call();
+            } catch (error) {
+                console.error("Error fetching following addresses:", error);
+                // If blockchain query fails, use localStorage as fallback
+                const followingKey = `following_${currentUsername}`;
+                const followingList = JSON.parse(localStorage.getItem(followingKey) || '[]');
+                followingAddresses = followingList;
+            }
+            
+            // Get current user's followers list from blockchain
+            let followerAddresses = [];
+            try {
+                followerAddresses = await FollowRelationshipContract.methods
+                    .getFollowers(currentAccount)
+                        .call();
+            } catch (error) {
+                console.error("Error fetching follower addresses:", error);
+                // If blockchain query fails, use localStorage as fallback
+                const followersKey = `followers_${currentUsername}`;
+                const followersList = JSON.parse(localStorage.getItem(followersKey) || '[]');
+                followerAddresses = followersList;
+            }
+            
+            // Filter usernames and create user objects
+            const validUsers = [];
+            
+            for (const username of usernames) {
+                try {
+                    // Skip if username is not valid
+                    if (!username) continue;
+                    
+                    // Skip if this is the current user (case-insensitive)
+                    if (username.toLowerCase() === currentUsername?.toLowerCase()) continue;
+                    
+                    // Get the address for this username
+                    const address = await UserAuthContract.methods.getAddressByUsername(username).call();
+                    
+                    // Don't recommend users with the same Ethereum address
+                    if (address.toLowerCase() === currentAccount.toLowerCase()) continue;
+                    
+                    // Skip if we're already following this user (check blockchain data)
+                    const isFollowing = followingAddresses.some(addr => 
+                        addr.toLowerCase() === address.toLowerCase()
+                    );
+                    if (isFollowing) continue;
+                    
+                    // Skip if this user is already following us
+                    const isFollower = followerAddresses.some(addr => 
+                        addr.toLowerCase() === address.toLowerCase()
+                    );
+                    if (isFollower) continue;
+                    
+                    // Add this user to our recommendation list
+                    validUsers.push({ username, address });
+                } catch (error) {
+                    console.log(`Error checking user ${username}:`, error);
+                    // Skip this user if there was an error
+                    continue;
+                }
+            }
+            
+            // Remove duplicates by username
+            const uniqueUsers = Array.from(
+                new Map(validUsers.map(user => [user.username.toLowerCase(), user])).values()
+            );
+            
+            console.log("Filtered recommendations:", uniqueUsers);
+            
+            // Limit to 5 random recommendations if there are more than 5
+            let recommendationList = uniqueUsers;
+            if (uniqueUsers.length > 5) {
+                recommendationList = uniqueUsers
+                    .sort(() => 0.5 - Math.random())
+                    .slice(0, 5);
+            }
+            
+            setRecommendedUsers(recommendationList);
+        } catch (error) {
+            console.error('Error fetching recommended users:', error);
+            setRecommendedUsers([]);
+        } finally {
+            setIsSearching(false);
+        }
+    };
+
+    const checkFollowRequests = () => {
+        try {
+            // Get current user's username
+            const userSession = JSON.parse(localStorage.getItem('userSession') || '{}');
+            const userData = JSON.parse(localStorage.getItem('userData') || '{}');
+            
+            // Try to get username from multiple possible locations
+            const currentUsername = 
+                localStorage.getItem('username') || 
+                userSession.username || 
+                userData.username;
+            
+            console.log("Current username checking follow requests:", currentUsername);
+            
+            if (!currentUsername) {
+                setFollowRequestCount(0);
+                return;
+            }
+            
+            // Get pending follow requests from localStorage
+            const pendingRequests = JSON.parse(localStorage.getItem('pendingFollowRequests') || '[]');
+            
+            // Filter for requests where current user is the recipient
+            const myRequests = pendingRequests.filter(req => 
+                req && req.to && req.to === currentUsername && req.from
+            );
+            
+            // Update the notification badge count
+            setFollowRequestCount(myRequests.length);
+            
+            console.log(`Found ${myRequests.length} pending follow requests for ${currentUsername}`);
+        } catch (error) {
+            console.error("Error checking follow requests:", error);
+            setFollowRequestCount(0);
+        }
+    };
+
+    const getUserStats = async () => {
+        try {
+            if (!userData || !userData.username) return { posts: 0, followers: 0, following: 0 };
+            
+            // Get current user's address
+            const accounts = await window.ethereum.request({
+                method: "eth_requestAccounts",
+            });
+            const currentAddress = accounts[0].toLowerCase();
+            
+            // Get user's posts count from blockchain
+            let userPostCount = 0;
+            try {
+                const postIds = await CreatePostContract.methods
+                    .getPostsByUser(currentAddress)
+                    .call();
+                userPostCount = postIds.length;
+            } catch (error) {
+                console.error("Error fetching user posts:", error);
+                // Fallback to localStorage if blockchain query fails
+                const userPosts = posts.filter(post => 
+                    post.creator.toLowerCase() === currentAddress
+                );
+                userPostCount = userPosts.length;
+            }
+            
+            // Get follower and following counts from blockchain
+            let followersCount = 0;
+            let followingCount = 0;
+            
+            try {
+                followersCount = await FollowRelationshipContract.methods
+                    .getFollowersCount(currentAddress)
+                    .call();
+                
+                followingCount = await FollowRelationshipContract.methods
+                    .getFollowingCount(currentAddress)
+                    .call();
+            } catch (error) {
+                console.error("Error fetching follow counts from blockchain:", error);
+                
+                // Fallback to localStorage
+                const username = userData.username;
+                const followersKey = `followers_${username}`;
+                const followingKey = `following_${username}`;
+                
+                const followersList = JSON.parse(localStorage.getItem(followersKey) || '[]');
+                const followingList = JSON.parse(localStorage.getItem(followingKey) || '[]');
+                
+                followersCount = followersList.length;
+                followingCount = followingList.length;
+            }
+            
+                    return {
+                posts: userPostCount,
+                followers: Number(followersCount),
+                following: Number(followingCount)
+            };
+        } catch (error) {
+            console.error("Error in getUserStats:", error);
+            return { posts: 0, followers: 0, following: 0 };
+        }
+    };
+
+    const handleLike = async (postId) => {
+        try {
+            // Get current accounts
+            const accounts = await window.ethereum.request({
+                method: "eth_requestAccounts"
+            });
+            const currentAddress = accounts[0].toLowerCase();
+            
+            // Call the contract method to like the post
+            await CreatePostContract.methods
+                .likePost(postId)
+                .send({ from: currentAddress });
+            
+            // Store in localStorage to persist the like state
+            const likedPosts = JSON.parse(localStorage.getItem('likedPosts') || '{}');
+            
+            if (!likedPosts[currentAddress]) {
+                likedPosts[currentAddress] = [];
+            }
+            
+            // Toggle the liked state
+            const isAlreadyLiked = likedPosts[currentAddress].includes(postId.toString());
+            
+            // Get the post details to determine its creator
+            const postToLike = posts.find(p => p.id === postId);
+            
+            if (postToLike && !isAlreadyLiked && postToLike.creator.toLowerCase() !== currentAddress) {
+                // Find the username of the current user (liker)
+                const userSession = JSON.parse(localStorage.getItem('userSession') || '{}');
+                const userData = JSON.parse(localStorage.getItem('userData') || '{}');
+                const currentUsername = userSession.username || userData.username;
+                
+                // Find username of post creator
+                let creatorUsername = '';
+                try {
+                    // Try to get from localStorage cache first
+                    const cachedUsernames = localStorage.getItem(`usernames_${postToLike.creator.toLowerCase()}`);
+                    if (cachedUsernames) {
+                        const parsed = JSON.parse(cachedUsernames);
+                        if (parsed && parsed.length > 0) {
+                            creatorUsername = parsed[0];
+                        }
+                    }
+                    
+                    if (!creatorUsername) {
+                        // Get from blockchain if not in cache
+                        const usernames = await UserAuthContract.methods
+                            .getUsernames(postToLike.creator)
+                            .call();
+                        
+                        if (usernames && usernames.length > 0) {
+                            creatorUsername = usernames[0];
+                        }
+                    }
+        } catch (error) {
+                    console.error("Error getting post creator username:", error);
+                }
+                
+                if (creatorUsername) {
+                    // Get post content to include in notification
+                    const localPosts = JSON.parse(localStorage.getItem('localPosts') || '{}');
+                    let postPreview = "Post";
+                    
+                    // Only create a notification if the user is liking (not unliking) a post
+                    if (!isAlreadyLiked && postToLike.creator.toLowerCase() !== currentAddress) {
+                        // Find the post content specifically for this post's contentHash
+                        if (localPosts[postToLike.contentHash]) {
+                            const content = localPosts[postToLike.contentHash];
+                            console.log("Found post content for notification:", content);
+                            
+                            // Extract meaningful preview text from the post
+                            if (content.text) {
+                                // Get first 50 chars of text or full text if shorter
+                                postPreview = content.text.length > 50 
+                                    ? content.text.substring(0, 50) + '...' 
+                                    : content.text;
+                            } else if (content.media && content.media.length > 0) {
+                                // If no text but has media, indicate that
+                                postPreview = `[Shared ${content.media.length} media item${content.media.length > 1 ? 's' : ''}]`;
+                            }
+                        } else {
+                            console.log("No post content found in localStorage for hash:", postToLike.contentHash);
+                        }
+
+                        // Create notification object with post preview
+                        const notification = {
+                            id: Date.now().toString(),
+                            type: 'like',
+                            fromUser: currentUsername,
+                            fromAddress: currentAddress,
+                            postId: postId.toString(),
+                            timestamp: new Date().toISOString(),
+                            read: false,
+                            postPreview: postPreview,
+                            contentHash: postToLike.contentHash // Add this to help debug
+                        };
+                        
+                        console.log("Creating notification with preview:", notification);
+                        
+                        // Add to notifications for the post creator
+                        const notifications = JSON.parse(localStorage.getItem('notifications') || '{}');
+                        if (!notifications[creatorUsername]) {
+                            notifications[creatorUsername] = [];
+                        }
+                        
+                        notifications[creatorUsername].push(notification);
+                        localStorage.setItem('notifications', JSON.stringify(notifications));
+                    }
+                }
+            }
+            
+            if (isAlreadyLiked) {
+                // Unlike: Remove from liked posts
+                likedPosts[currentAddress] = likedPosts[currentAddress].filter(id => id !== postId.toString());
+            } else {
+                // Like: Add to liked posts
+                likedPosts[currentAddress].push(postId.toString());
+            }
+            
+            localStorage.setItem('likedPosts', JSON.stringify(likedPosts));
+            
+            // Update UI immediately
+            setPosts(prevPosts => 
+                prevPosts.map(post => {
+                    if (post.id === postId) {
+                        const newLikeCount = isAlreadyLiked ? post.likes.length - 1 : post.likes.length + 1;
+                        const newLikes = isAlreadyLiked 
+                            ? post.likes.filter(addr => addr.toLowerCase() !== currentAddress)
+                            : [...post.likes, currentAddress];
+                        
+                        return {
+                            ...post,
+                            likes: newLikes,
+                            isLikedByMe: !isAlreadyLiked
+                        };
+                    }
+                    return post;
+                })
+            );
+            
+            // Add notification if post creator isn't the current user
+            const postData = await fetchPostData(postId);
+            if (postData && postData.creator !== currentAddress) {
+                const username = await getUsernameByAddress(currentAddress);
+                const displayName = username || currentAddress.substring(0, 6) + '...' + currentAddress.substring(38);
+                
+                // Create notification
+                await notificationService.createLikeNotification(
+                    postData.creator, 
+                    displayName, 
+                    postId,
+                    postData.content.substring(0, 50) + (postData.content.length > 50 ? '...' : '')
+                );
+            }
+        } catch (error) {
+            console.error("Error liking post:", error);
+            toast.error("Failed to like post");
+        }
+    };
+
+    const getUsernameByAddress = async (address) => {
+        try {
+            // Try to get username from localStorage cache first
+            const cachedUsernames = localStorage.getItem(`usernames_${address.toLowerCase()}`);
+            if (cachedUsernames) {
+                try {
+                    const parsed = JSON.parse(cachedUsernames);
+                    if (parsed && parsed.length > 0) {
+                        return parsed[0];
+                    }
+                } catch (e) {
+                    console.error("Error parsing cached username:", e);
+                }
+            }
+            
+            // If not in cache, try to get from blockchain
+            try {
+                const usernames = await UserAuthContract.methods
+                    .getUsernames(address)
+                    .call();
+                    
+                if (usernames && usernames.length > 0 && usernames[0]) {
+                    // Cache the result for future use
+                    localStorage.setItem(`usernames_${address.toLowerCase()}`, JSON.stringify(usernames));
+                    return usernames[0];
+                }
+            } catch (err) {
+                console.error("Error fetching username from blockchain:", err);
+            }
+            
+            // Fallback to shortened address if no username found
+            return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
+        } catch (error) {
+            console.error("Error in getUsernameByAddress:", error);
+            return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
+        }
+    };
+
+    const getUserInitial = (address) => {
+        // Try to get username for this address from localStorage
+        const cachedUsernames = localStorage.getItem(`usernames_${address.toLowerCase()}`);
+        if (cachedUsernames) {
+            try {
+                const parsed = JSON.parse(cachedUsernames);
+                if (parsed && parsed.length > 0 && parsed[0]) {
+                    return parsed[0][0].toUpperCase();
+                }
+            } catch (e) {
+                console.error("Error parsing cached username for initial:", e);
+            }
+        }
+        
+        // Fallback to first two characters of address
+        return address.substring(2, 4).toUpperCase();
+    };
+    
+    const PostCard = ({ post }) => {
+        const [postContent, setPostContent] = useState(null);
+        const [loading, setLoading] = useState(true);
+        const [error, setError] = useState(null);
+        const [displayName, setDisplayName] = useState(''); // State for username
+        const [avatarInitial, setAvatarInitial] = useState(''); // State for avatar initial
+        const [showComments, setShowComments] = useState(false);
+        const [commentText, setCommentText] = useState('');
+        const [comments, setComments] = useState([]);
+        const [isLoadingComments, setIsLoadingComments] = useState(false);
+        const [currentAddress, setCurrentAddress] = useState('');
+
+        useEffect(() => {
+            // Always load comments on mount to get the count and preview top 3
+            const fetchInitialData = async () => {
+                try {
+                    // Get the current user's address first
+                    const accounts = await window.ethereum.request({
+                        method: "eth_requestAccounts",
+                    });
+                    setCurrentAddress(accounts[0].toLowerCase());
+                    
+                    // Fetch comments to display count and top 3 by default
+                    await fetchComments(true);
+                } catch (error) {
+                    console.error("Error loading initial comment data:", error);
+                }
+            };
+            
+            fetchInitialData();
+        }, [post.id]);
+
+        useEffect(() => {
+            const fetchPostContent = async () => {
+                try {
+                    setLoading(true);
+                    setError(null);
+                    const contentHash = post.contentHash;
+                    
+                    // ALWAYS check localStorage first as our primary source
+                    const localPosts = JSON.parse(localStorage.getItem('localPosts') || '{}');
+                    if (localPosts[contentHash]) {
+                        console.log("Found post in localStorage:", contentHash);
+                        setPostContent(localPosts[contentHash]);
+                        setLoading(false);
+                        return;
+                    }
+                    
+                    // Try to get content from IPFS
+                    try {
+                        const contentBuffer = await getFromIPFS(contentHash);
+                        
+                        // Try to parse the data
+                        try {
+                            const contentText = new TextDecoder().decode(contentBuffer);
+                            const postData = JSON.parse(contentText);
+                            
+                            // Cache the successfully retrieved post
+                            localPosts[contentHash] = postData;
+                            localStorage.setItem('localPosts', JSON.stringify(localPosts));
+                            
+                            setPostContent(postData);
+                        } catch (parseError) {
+                            console.error("Error parsing post data:", parseError);
+                            throw new Error("Could not parse post data");
+                        }
+                    } catch (ipfsError) {
+                        console.error("IPFS retrieval failed:", ipfsError);
+                        
+                        // Create placeholder content with blockchain data
+                        const fallbackContent = {
+                            text: "Post created at " + formatDate(post.timestamp),
+                            timestamp: post.timestamp,
+                            media: [],
+                            tags: [],
+                            creator: post.creator
+                        };
+                        
+                        // Store this placeholder in localStorage for future use
+                        localPosts[contentHash] = fallbackContent;
+                        localStorage.setItem('localPosts', JSON.stringify(localPosts));
+                        
+                        setPostContent(fallbackContent);
+                    }
+                } catch (error) {
+                    console.error("Error in post content processing:", error);
+                    setError(error.message);
+        } finally {
+                    setLoading(false);
+        }
+    };
+
+            fetchPostContent();
+        }, [post.contentHash, post.timestamp, post.creator]);
+        
+        useEffect(() => {
+            if (showComments) {
+                fetchComments(false);
+            }
+        }, [showComments]);
+
+        const fetchComments = async (topOnly = false) => {
+            setIsLoadingComments(true);
+            
+            try {
+                // Get comment references from localStorage
+                const commentRefs = JSON.parse(localStorage.getItem('postCommentRefs') || '{}');
+                const postCommentRefs = commentRefs[post.id] || [];
+                
+                // If there are no comments, set empty array and return
+                if (postCommentRefs.length === 0) {
+                    setComments([]);
+                    setIsLoadingComments(false);
+                    return;
+                }
+                
+                // Get cached comments
+                const cachedComments = JSON.parse(localStorage.getItem('commentContent') || '{}');
+                
+                let commentsData = [];
+                
+                // Process each comment reference
+                for (const ref of postCommentRefs) {
+                    try {
+                        let commentData;
+                        
+                        // First check if we have it cached
+                        if (cachedComments[ref.hash]) {
+                            commentData = cachedComments[ref.hash];
+                        } else {
+                            // If not cached, try to fetch from IPFS
+                            try {
+                                const data = await getFromIPFS(ref.hash);
+                                const jsonData = JSON.parse(data.toString());
+                                commentData = jsonData;
+                                
+                                // Cache it for future
+                                cachedComments[ref.hash] = commentData;
+                                localStorage.setItem('commentContent', JSON.stringify(cachedComments));
+                            } catch (error) {
+                                console.error("Failed to fetch comment from IPFS:", error);
+                                // If we can't get it from IPFS, use the fallback data
+                                commentData = ref.data || {
+                                    id: ref.hash,
+                                    text: "Comment content unavailable",
+                                    authorName: ref.authorName || "Unknown",
+                                    timestamp: ref.timestamp || new Date().toISOString(),
+                                    likes: []
+                                };
+                            }
+                        }
+                        
+                        commentsData.push(commentData);
+                    } catch (error) {
+                        console.error("Error processing comment:", error);
+                    }
+                }
+                
+                // Sort comments by timestamp, newest first
+                commentsData.sort((a, b) => {
+                    const dateA = new Date(a.timestamp);
+                    const dateB = new Date(b.timestamp);
+                    return dateB - dateA;
+                });
+                
+                setComments(commentsData);
+            } catch (error) {
+                console.error("Failed to fetch comments:", error);
+                setComments([]);
+            } finally {
+                setIsLoadingComments(false);
+            }
+        };
+
+        const handleCommentsClick = (e) => {
+            if (e) {
+                e.preventDefault(); // Prevent navigation
+                e.stopPropagation(); // Stop event bubbling
+            }
+            
+            setShowComments(!showComments);
+            if (!showComments) {
+                fetchComments(false); // fetch all comments
+            }
+        };
+
+        const handleAddComment = async () => {
+            if (!commentText.trim()) return;
+            
+            try {
+                const accounts = await window.ethereum.request({
+                    method: "eth_requestAccounts"
+                });
+                const currentAddress = accounts[0].toLowerCase();
+                
+                // Get current user's username
+                const userSession = JSON.parse(localStorage.getItem('userSession') || '{}');
+                const userData = JSON.parse(localStorage.getItem('userData') || '{}');
+                const currentUsername = userSession.username || userData.username;
+                
+                // Create new comment object
+                const newComment = {
+                    id: Date.now().toString(),
+                    text: commentText,
+                    authorAddress: currentAddress,
+                    authorName: currentUsername,
+                    timestamp: new Date().toISOString(),
+                    likes: []
+                };
+                
+                // Upload comment to IPFS
+                try {
+                    // Convert comment object to JSON string and then to buffer
+                    const commentString = JSON.stringify(newComment);
+                    const commentBuffer = Buffer.from(commentString);
+                    
+                    // Upload to IPFS using the existing uploadToIPFS function
+                    const { uploadToIPFS } = await import('../ipfs');
+                    const commentHash = await uploadToIPFS(commentBuffer);
+                    
+                    console.log("Uploaded comment to IPFS with hash:", commentHash);
+                    
+                    // Store the comment itself in localStorage as a cache
+                    const commentContent = JSON.parse(localStorage.getItem('commentContent') || '{}');
+                    commentContent[commentHash] = newComment;
+                    localStorage.setItem('commentContent', JSON.stringify(commentContent));
+                    
+                    // Store the comment hash in the post's comment list
+                    const commentRefs = JSON.parse(localStorage.getItem('postCommentRefs') || '{}');
+                    if (!commentRefs[post.id]) {
+                        commentRefs[post.id] = [];
+                    }
+                    
+                    // Add reference with timestamp for sorting
+                    commentRefs[post.id].push({
+                        hash: commentHash,
+                        timestamp: newComment.timestamp,
+                        authorName: currentUsername
+                    });
+                    
+                    localStorage.setItem('postCommentRefs', JSON.stringify(commentRefs));
+                    
+                    // Update UI immediately
+                    const updatedComments = [...comments, newComment];
+                    setComments(updatedComments);
+                    
+                    // Also keep in postComments for backward compatibility
+                    const allComments = JSON.parse(localStorage.getItem('postComments') || '{}');
+                    allComments[post.id] = updatedComments;
+                    localStorage.setItem('postComments', JSON.stringify(allComments));
+                    
+                    // Clear input
+                    setCommentText('');
+                    
+                    // Create notification for post owner if it's not the current user
+                    if (post.creator.toLowerCase() !== currentAddress) {
+                        const username = await getUsernameByAddress(currentAddress);
+                        const displayName = username || currentAddress.substring(0, 6) + '...' + currentAddress.substring(38);
+                        
+                        // Create notification
+                        await notificationService.createCommentNotification(
+                            post.creator,
+                            displayName,
+                            post.id,
+                            commentText,
+                            commentText.substring(0, 50) + (commentText.length > 50 ? '...' : '')
+                        );
+                    }
+                } catch (ipfsError) {
+                    console.error("Failed to upload comment to IPFS:", ipfsError);
+                    toast.error("Failed to store comment on IPFS. Saving locally only.");
+                    
+                    // Add to state anyway (localStorage only as fallback)
+                    const updatedComments = [...comments, newComment];
+                    setComments(updatedComments);
+                    
+                    const allComments = JSON.parse(localStorage.getItem('postComments') || '{}');
+                    allComments[post.id] = updatedComments;
+                    localStorage.setItem('postComments', JSON.stringify(allComments));
+                    
+                    setCommentText('');
+                }
+            } catch (error) {
+                console.error("Error adding comment:", error);
+                toast.error("Failed to add comment");
+            }
+        };
+
+        const handleLikeComment = async (commentId) => {
+            try {
+                const accounts = await window.ethereum.request({
+                    method: "eth_requestAccounts"
+                });
+                const currentAddress = accounts[0].toLowerCase();
+                
+                // Update comment likes
+                const updatedComments = comments.map(comment => {
+                    if (comment.id === commentId) {
+                        const isAlreadyLiked = comment.likes.includes(currentAddress);
+                        
+                        if (isAlreadyLiked) {
+                            // Unlike
+                            return {
+                                ...comment,
+                                likes: comment.likes.filter(addr => addr !== currentAddress)
+                            };
+                        } else {
+                            // Like
+                            return {
+                                ...comment,
+                                likes: [...comment.likes, currentAddress]
+                            };
+                        }
+                    }
+                    return comment;
+                });
+                
+                setComments(updatedComments);
+                
+                // Find the comment that was liked
+                const likedComment = updatedComments.find(c => c.id === commentId);
+                
+                if (likedComment) {
+                    // Update in the commentContent cache
+                    const commentContent = JSON.parse(localStorage.getItem('commentContent') || '{}');
+                    
+                    // Find the hash for this comment
+                    const commentRefs = JSON.parse(localStorage.getItem('postCommentRefs') || '{}');
+                    const postRefs = commentRefs[post.id] || [];
+                    
+                    // Look for a matching IPFS hash by ID
+                    const ref = postRefs.find(r => {
+                        const cached = commentContent[r.hash];
+                        return cached && cached.id === commentId;
+                    });
+                    
+                    if (ref) {
+                        // Update the cached version
+                        commentContent[ref.hash] = likedComment;
+                        localStorage.setItem('commentContent', JSON.stringify(commentContent));
+                    }
+                }
+                
+                // Also update in the old storage format for backward compatibility
+                const allComments = JSON.parse(localStorage.getItem('postComments') || '{}');
+                allComments[post.id] = updatedComments;
+                localStorage.setItem('postComments', JSON.stringify(allComments));
+            } catch (error) {
+                console.error("Error liking comment:", error);
+                toast.error("Failed to like comment");
+            }
+        };
+
+        const formatCommentTime = (timestamp) => {
+            let date;
+            
+            // Check if timestamp is a string (ISO format) or a number (Unix timestamp)
+            if (typeof timestamp === 'string') {
+                date = new Date(timestamp);
+            } else {
+                date = new Date(timestamp); // Will handle numbers automatically
+            }
+            
+            const now = new Date();
+            const diffMs = now - date;
+            const diffSec = Math.floor(diffMs / 1000);
+            const diffMin = Math.floor(diffSec / 60);
+            const diffHour = Math.floor(diffMin / 60);
+            const diffDay = Math.floor(diffHour / 24);
+            
+            if (diffSec < 60) return `${diffSec}s`;
+            if (diffMin < 60) return `${diffMin}m`;
+            if (diffHour < 24) return `${diffHour}h`;
+            if (diffDay < 7) return `${diffDay}d`;
+            
+            // Return formatted date for older posts
+            return `${date.getDate()} ${date.toLocaleString('default', { month: 'short' })}`;
+        };
+
+        useEffect(() => {
+            const fetchUserData = async () => {
+                try {
+                    // Try to get username from localStorage cache first
+                    const cachedUsernames = localStorage.getItem(`usernames_${post.creator.toLowerCase()}`);
+                    if (cachedUsernames) {
+                        try {
+                            const parsed = JSON.parse(cachedUsernames);
+                            if (parsed && parsed.length > 0) {
+                                setDisplayName(parsed[0]);
+                                setAvatarInitial(parsed[0][0].toUpperCase());
+                                return;
+                            }
+                        } catch (e) {
+                            console.error("Error parsing cached username:", e);
+                        }
+                    }
+                    
+                    // If not in cache, try to get from blockchain
+                    try {
+                        const usernames = await UserAuthContract.methods
+                            .getUsernames(post.creator)
+                            .call();
+                            
+                        if (usernames && usernames.length > 0 && usernames[0]) {
+                            setDisplayName(usernames[0]);
+                            setAvatarInitial(usernames[0][0].toUpperCase());
+                            // Cache the result for future use
+                            localStorage.setItem(`usernames_${post.creator.toLowerCase()}`, JSON.stringify(usernames));
+                            return;
+                        }
+                    } catch (err) {
+                        console.error("Error fetching username from blockchain:", err);
+                    }
+                    
+                    // Fallback to shortened address if no username found
+                    const shortAddress = `${post.creator.substring(0, 6)}...${post.creator.substring(post.creator.length - 4)}`;
+                    setDisplayName(shortAddress);
+                    setAvatarInitial(post.creator.substring(2, 4).toUpperCase());
+                } catch (error) {
+                    console.error("Error in fetchUserData:", error);
+                    const shortAddress = `${post.creator.substring(0, 6)}...${post.creator.substring(post.creator.length - 4)}`;
+                    setDisplayName(shortAddress);
+                    setAvatarInitial(post.creator.substring(2, 4).toUpperCase());
+                }
+            };
+
+            fetchUserData();
+        }, [post.creator]);
+
+        if (loading) {
     return (
-        <div className="layout-container">
-            {/* Left Sidebar */}
-            <aside className="left-sidebar">
-                <div className="logo">
-                    <h1>BlockConnect</h1>
+                <div className="post-card animate-post" key={post.id}>
+                    <div className="post-header">
+                        <div className="post-avatar">{avatarInitial || '...'}</div>
+                        <div className="post-meta">
+                            <h4>{displayName || 'Loading...'}</h4>
+                            <span className="post-time">{formatDate(post.timestamp)}</span>
+                        </div>
+                    </div>
+                    <div className="post-content">
+                        <div className="loading-spinner">
+                            <div className="spinner"></div>
+                            <p>Loading post...</p>
+                        </div>
+                    </div>
                 </div>
+            );
+        }
+        
+        // Format address for display in hover or secondary text
+        const addressDisplay = `${post.creator.substring(0, 6)}...${post.creator.substring(post.creator.length - 4)}`;
+        
+        return (
+            <div 
+                className="post-card animate-post" 
+                key={post.id} 
+                onClick={() => setSelectedPost(post)}
+            >
+                <div className="post-header">
+                    <div className="post-avatar">{avatarInitial}</div>
+                    <div className="post-meta">
+                        <h4>{displayName}</h4>
+                        <span className="post-time">
+                            {formatDate(post.timestamp)} • {addressDisplay}
+                        </span>
+                    </div>
+                    <button className="post-menu">
+                        <MoreHorizontal size={18} />
+                    </button>
+                </div>
+                
+                <div className="post-content">
+                    {error ? (
+                        <p className="error-message">Error loading post content: {error}</p>
+                    ) : postContent ? (
+                        <>
+                            {postContent.text && (
+                                <p>{postContent.text}</p>
+                            )}
+                            
+                            {/* Display tags if any */}
+                            {postContent.tags && postContent.tags.length > 0 && (
+                                <div className="post-tags">
+                                    {postContent.tags.map((tag, index) => (
+                                        <span key={index} className="post-tag">
+                                            <Hash size={14} style={{marginRight: '4px'}} />
+                                            {tag}
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+                            
+                            {/* Display media files if any */}
+                            {postContent.media && postContent.media.length > 0 && (
+                                <div className="post-media-container">
+                                    {postContent.media.map((media, index) => (
+                                        <div key={index} className="post-media-item">
+                                            {media.type && media.type.startsWith('image/') ? (
+                                                <img 
+                                                    src={`https://ipfs.io/ipfs/${media.hash}`} 
+                                                    alt={media.name || "Post image"} 
+                                                    className="post-image" 
+                                                    loading="lazy"
+                                                    onError={(e) => {
+                                                        e.target.onerror = null;
+                                                        e.target.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 24 24' fill='none' stroke='%23ddd' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2' ry='2'/%3E%3Ccircle cx='8.5' cy='8.5' r='1.5'/%3E%3Cpolyline points='21 15 16 10 5 21'/%3E%3C/svg%3E";
+                                                        e.target.style.padding = "20px";
+                                                        e.target.style.background = "#f5f5f5";
+                                                    }}
+                                                />
+                                            ) : media.type && media.type.startsWith('video/') ? (
+                                                <video 
+                                                    src={`https://ipfs.io/ipfs/${media.hash}`} 
+                                                    controls
+                                                    className="post-video"
+                                                    onError={(e) => {
+                                                        e.target.onerror = null;
+                                                        e.target.style.display = "none";
+                                                        e.target.parentNode.innerHTML = "<div class='post-file'><svg width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'><path d='M12 2v8L22 7v8H12v7'></path></svg><span>Video unavailable</span></div>";
+                                                    }}
+                                                />
+                                            ) : (
+                                                <div className="post-file">
+                                                    <File size={24} />
+                                                    <span>{media.name || "File"}</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </>
+                    ) : (
+                        <p>Post content unavailable</p>
+                    )}
+                </div>
+                
+                <div className="post-actions">
+                    <button 
+                        className={`action-button ${post.isLikedByMe ? 'active' : ''}`} 
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            handleLike(post.id);
+                        }}
+                    >
+                        {post.isLikedByMe ? (
+                            <Heart size={18} fill="#ef4444" color="#ef4444" />
+                        ) : (
+                            <Heart size={18} />
+                        )}
+                        <span>{post.likes.length > 0 ? post.likes.length : ''} Like{post.likes.length !== 1 ? 's' : ''}</span>
+                    </button>
+                    
+                    <button 
+                        className={`action-button ${showComments ? 'active' : ''}`} 
+                        onClick={handleCommentsClick}
+                    >
+                        <MessageSquare size={20} />
+                        <span>{comments.length > 0 ? comments.length : ''} Comment{comments.length !== 1 ? 's' : ''}</span>
+                    </button>
+                    
+                    <button className="action-button" onClick={(e) => e.stopPropagation()}>
+                        <Share2 size={18} />
+                        <span>Share</span>
+                    </button>
+                </div>
+
+                {/* Comments section with preview of top 3 */}
+                <div className={`comments-section ${showComments ? 'expanded' : ''}`}>
+                    {isLoadingComments ? (
+                        <div className="comment-loading">
+                            <div className="spinner-small"></div>
+                            <span>Loading comments...</span>
+                        </div>
+                    ) : (
+                        <>
+                            {/* Always show comment input */}
+                            <div className="add-comment">
+                                <div className="comment-input-container">
+                                    <input
+                                        type="text"
+                                        placeholder="Add a comment..."
+                                        value={commentText}
+                                        onChange={(e) => setCommentText(e.target.value)}
+                                        onClick={(e) => e.stopPropagation()}
+                                    />
+                                    <button 
+                                        className="post-comment-btn"
+                                        disabled={!commentText.trim()}
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleAddComment();
+                                        }}
+                                    >
+                                        Post
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            {/* Show top 3 comments always, or all comments when expanded */}
+                            {comments.length > 0 && (
+                                <div className="comments-list">
+                                    {(showComments ? comments : comments.slice(0, 3)).map((comment) => (
+                                        <div key={comment.id} className="comment-item">
+                                            <div className="comment-avatar">
+                                                {comment.authorName ? comment.authorName[0].toUpperCase() : "U"}
+                                            </div>
+                                            <div className="comment-content">
+                                                <div className="comment-header">
+                                                    <span className="comment-author">{comment.authorName || "Unknown User"}</span>
+                                                    <span className="comment-time">{formatCommentTime(comment.timestamp)}</span>
+                                                </div>
+                                                <p className="comment-text">{comment.text}</p>
+                                                <div className="comment-actions">
+                                                    <button
+                                                        className={`comment-like-btn ${comment.likes && Array.isArray(comment.likes) && comment.likes.includes(currentAddress) ? 'active' : ''}`}
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleLikeComment(comment.id);
+                                                        }}
+                                                    >
+                                                        <Heart size={14} />
+                                                        <span>{comment.likes && Array.isArray(comment.likes) ? comment.likes.length : 0}</span>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            
+                            {!showComments && comments.length > 0 && comments.length > 3 && (
+                                <button 
+                                    className="view-more-comments"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setShowComments(true);
+                                    }}
+                                >
+                                    View all {comments.length} comments
+                                </button>
+                            )}
+                            
+                            {comments.length === 0 && (
+                                <p className="no-comments">No comments yet. Be the first to comment!</p>
+                            )}
+                        </>
+                    )}
+                </div>
+            </div>
+        );
+    };
+
+    // Add this function to check for notifications
+    const checkNotifications = () => {
+        try {
+            // Get current user's username
+            const userSession = JSON.parse(localStorage.getItem('userSession') || '{}');
+            const userData = JSON.parse(localStorage.getItem('userData') || '{}');
+            const currentUsername = userSession.username || userData.username;
+            
+            if (!currentUsername) return 0;
+            
+            // Get notifications for this user
+            const notifications = JSON.parse(localStorage.getItem('notifications') || '{}');
+            const userNotifications = notifications[currentUsername] || [];
+            
+            // Count unread notifications
+            const unreadCount = userNotifications.filter(n => !n.read).length;
+            
+            return unreadCount;
+        } catch (error) {
+            console.error("Error checking notifications:", error);
+            return 0;
+        }
+    };
+
+    const fetchPostData = async (postId) => {
+        try {
+            // First try to get post details from blockchain
+            const postDetails = await CreatePostContract.methods
+                .getPost(postId)
+                .call();
+            
+            // Get post content from localStorage or IPFS
+            const contentHash = postDetails.contentHash;
+            let content = null;
+            
+            // Check localStorage first
+            const localPosts = JSON.parse(localStorage.getItem('localPosts') || '{}');
+            if (localPosts[contentHash]) {
+                content = localPosts[contentHash];
+            } else {
+                // Try to get from IPFS
+                try {
+                    const contentBuffer = await getFromIPFS(contentHash);
+                    content = JSON.parse(new TextDecoder().decode(contentBuffer));
+                    
+                    // Cache for future use
+                    localPosts[contentHash] = content;
+                    localStorage.setItem('localPosts', JSON.stringify(localPosts));
+                } catch (error) {
+                    console.error("Error fetching content from IPFS:", error);
+                }
+            }
+            
+            return {
+                id: postDetails.postId,
+                creator: postDetails.creator,
+                contentHash: contentHash,
+                timestamp: parseInt(postDetails.timestamp) * 1000,
+                hasMedia: postDetails.hasMedia,
+                tags: postDetails.tags,
+                content: content
+            };
+        } catch (error) {
+            console.error("Error fetching post data:", error);
+            return null;
+        }
+    };
+
+    return (
+        <div className={`homepage-wrapper ${darkMode ? 'dark-mode' : ''}`}>
+            <div className="homepage-container">
+                {/* Sidebar */}
+                <aside className={`sidebar ${animateContent ? 'animate-in' : ''}`}>
+                <div className="logo">
+                        <div className="logo-container">
+                            <img src={LogoImage} alt="BlockConnect Logo" />
+                            <span className="brand-text">BlockConnect</span>
+                </div>
+                    </div>
+                    
                 <nav className="sidebar-nav">
-                    <ul className="nav-list">
-                        <li className="nav-item">
-                            <a href="/home" className="active">
+                        <ul>
+                            <li className="active">
+                                <a href="/home">
                                 <Home size={20} />
                                 <span>Home</span>
                             </a>
                         </li>
-                        <li className="nav-item">
-                            <a href="/profile">
-                                <User size={20} />
-                                <span>Profile</span>
-                            </a>
+                            <li>
+                            <NotificationBadge />
                         </li>
-                        <li className="nav-item">
-                            <a href="/data-control">
-                                <Shield size={20} />
-                                <span>Data Control</span>
-                            </a>
-                        </li>
-                        <li className="nav-item">
-                            <a href="/explore">
-                                <Search size={20} />
-                                <span>Explore</span>
-                            </a>
-                        </li>
-                        <li className="nav-item">
-                            <a href="/notifications">
-                                <Bell size={20} />
-                                <span>Notifications</span>
-                            </a>
-                        </li>
-                        <li className="nav-item">
-                            <a href="/messages">
+                            <li>
+                                <a href="/messages" className="sidebar-nav-link">
+                                    <div className="nav-icon-container">
                                 <MessageSquare size={20} />
+                                        {unreadMessages > 0 && (
+                                            <span className="notification-badge">{unreadMessages}</span>
+                                        )}
+                                    </div>
                                 <span>Messages</span>
                             </a>
                         </li>
-                        <li className="nav-item">
-                            <a href="/bookmarks">
-                                <Bookmark size={20} />
-                                <span>Bookmarks</span>
+                            <li>
+                                <a href="/profile">
+                                    <User size={20} />
+                                    <span>Profile</span>
                             </a>
                         </li>
-                        <li className="nav-item">
-                            <a href="/communities">
-                                <Users size={20} />
-                                <span>Communities</span>
+                            <li>
+                                <a href="/saved">
+                                    <Bookmark size={20} />
+                                    <span>Saved</span>
                             </a>
                         </li>
-                        <li className="nav-item">
-                            <a href="/trending">
-                                <TrendingUp size={20} />
-                                <span>Trending</span>
-                            </a>
-                        </li>
-                        <li className="nav-item">
-                            <a href="/topics">
-                                <Hash size={20} />
-                                <span>Topics</span>
-                            </a>
-                        </li>
-                        <li className="nav-item">
-                            <a href="#" onClick={handleHiddenTweetsClick}>
-                                <Eye size={20} />
-                                <span>Hidden Tweets</span>
-                            </a>
-                        </li>
-                        <li className="sidebar-divider"></li>
-                        <li className="nav-item">
-                            <button className="settings-button" onClick={() => setShowSettings(!showSettings)}>
+                            <li>
+                                <a href="/settings">
                                 <Settings size={20} />
                                 <span>Settings</span>
-                            </button>
-                            {showSettings && (
-                                <div className="settings-dropdown">
-                                    <button className="settings-item" onClick={() => navigate("/edit-profile")}>
-                                        <User size={18} />
-                                        <span>Edit Profile</span>
-                                    </button>
-                                    <button className="settings-item" onClick={toggleDarkMode}>
-                                        {darkMode ? (
-                                            <>
-                                                <Sun size={18} />
-                                                <span>Light Mode</span>
-                                            </>
-                                        ) : (
-                                            <>
-                                                <Moon size={18} />
-                                                <span>Dark Mode</span>
-                                            </>
-                                        )}
-                                    </button>
-                                    <button className="settings-item" onClick={() => navigate("/privacy")}>
-                                        <Shield size={18} />
-                                        <span>Privacy</span>
-                                    </button>
-                                    <button className="settings-item" onClick={() => navigate("/help")}>
-                                        <HelpCircle size={18} />
-                                        <span>Help Center</span>
-                                    </button>
-                                </div>
-                            )}
-                        </li>
-                        <li className="nav-item">
-                            <a href="#logout" onClick={handleLogout} className="logout-button">
-                                <LogOut size={20} />
-                                <span>Logout</span>
                             </a>
                         </li>
                     </ul>
                 </nav>
-            </aside>
+                    
+                    <button className="create-post-btn" onClick={handleCreatePost}>
+                        <Plus size={18} />
+                        <span>Create Post</span>
+                    </button>
+                    
+                    <div className="sidebar-footer">
+                        <button className="dark-mode-toggle" onClick={toggleDarkMode}>
+                            {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+                            <span>{darkMode ? 'Light Mode' : 'Dark Mode'}</span>
+                        </button>
+                        
+                        <button className="logout-button" onClick={handleLogout}>
+                            <LogOut size={18} />
+                            <span>Log Out</span>
+                        </button>
+                        
+                        <div className="user-profile" onClick={handleProfileClick}>
+                            <div className="avatar">
+                                {userData?.username?.[0]?.toUpperCase() || "U"}
+                            </div>
+                            <div className="user-info">
+                                <h4>{userData?.username || "User"}</h4>
+                                <p>@{userData?.username?.toLowerCase().replace(/\s+/g, '_') || "username"}</p>
+                            </div>
+                            <MoreHorizontal size={16} />
+                        </div>
+                    </div>
+                </aside>
 
-            {/* Main Content */}
-            <main className="main-content">
-                <header className="main-header">
-
-                </header>
-
-                <div className="content-scroll">
-                    <div className="search-container center-search">
-                        <Search size={20} className="search-icon" />
+                {/* Main Content */}
+                <main className={`main-content ${animateContent ? 'animate-in' : ''}`}>
+                    <header className="content-header">
+                        <h2>Home</h2>
+                        <div className="search-wrapper" style={{ position: 'relative' }}>
+                            <div className="search-container">
+                                <Search size={18} />
                         <input 
                             type="text" 
-                            placeholder="Search BlockConnect"
+                                    placeholder="Search users..."
                             value={searchQuery}
-                            onChange={handleSearch}
+                                    onChange={(e) => {
+                                        setSearchQuery(e.target.value);
+                                        handleSearch(e);
+                                    }}
                         />
+                            </div>
+                            
+                            {/* Search results positioned relative to search container */}
                         {searchQuery && searchResults.length > 0 && (
                             <div className="search-results">
-                                {searchResults.map((user, index) => (
+                                    {searchResults.map((result) => (
                                     <div 
-                                        key={index} 
+                                            key={result.username} 
                                         className="search-result-item"
-                                        onClick={() => {
-                                            const encodedUsername = encodeURIComponent(user.username);
-                                            navigate(`/profile/${encodedUsername}`);
-                                            setSearchQuery('');
-                                            setSearchResults([]);
-                                        }}
-                                        role="button"
-                                        tabIndex={0}
-                                    >
-                                        <div 
-                                            className="user-avatar"
-                                            style={{ backgroundColor: `#${user.address.slice(2, 8)}` }}
+                                            onClick={() => navigate(`/profile/${result.username}`)}
                                         >
-                                            {user.username[0].toUpperCase()}
+                                            <div className="result-avatar">
+                                                {result.username[0].toUpperCase()}
                                         </div>
-                                        <div className="user-info">
-                                            <p className="user-name">{user.username}</p>
-                                            <p className="user-handle">@{user.address.slice(0, 6)}...{user.address.slice(-4)}</p>
+                                            <div className="result-info">
+                                                <h4>{result.username}</h4>
+                                                <p className="result-address">{result.address.slice(0, 8)}...</p>
                                         </div>
                                     </div>
                                 ))}
                             </div>
                         )}
                     </div>
+                    </header>
 
-                    <div className="compose-tweet">
-                        <div className="compose-tweet-input">
-                            <div className="user-avatar">
-                                {/* Get first letter of username from localStorage */}
-                                {JSON.parse(localStorage.getItem('userSession'))?.username?.[0]?.toUpperCase() || 'U'}
+                    <div className="create-post-card">
+                        <div className="create-post-header">
+                            <div className="post-avatar">
+                                {userData?.username?.[0]?.toUpperCase() || "U"}
                             </div>
-                            <div className="compose-input-container">
-                                <input 
-                                    type="text" 
-                                    placeholder="What's happening?"
-                                    className="compose-input"
-                                />
-                                <div className="compose-actions">
-                                    <button className="post-tweet-btn">Post</button>
+                            <div className="create-post-input" onClick={handleCreatePost}>
+                                <p>What's on your mind?</p>
                                 </div>
                             </div>
+                        <div className="create-post-actions">
+                            <button onClick={handleCreatePost}>
+                                <Image size={20} />
+                                <span>Photo</span>
+                            </button>
+                            <button onClick={handleCreatePost}>
+                                <LinkIcon size={20} />
+                                <span>Link</span>
+                            </button>
+                            <button onClick={handleCreatePost}>
+                                <Calendar size={20} />
+                                <span>Event</span>
+                            </button>
                         </div>
                     </div>
 
                     <div className="posts-container">
                         {loading ? (
-                            <div className="loading-container">
-                                <div className="loader"></div>
+                            <div className="loading-spinner">
+                                <div className="spinner"></div>
                                 <p>Loading posts...</p>
                             </div>
-                        ) : error ? (
-                            <div className="error-container">
-                                <p>{error}</p>
-                            </div>
-                        ) : (
-                            posts.length === 0 ? (
+                        ) : posts.length === 0 ? (
                                 <div className="no-posts">
-                                    <p>No posts yet. Be the first to post something!</p>
+                                <h3>No posts yet</h3>
+                                <p>Be the first to share something!</p>
+                                <button onClick={handleCreatePost}>Create Post</button>
                                 </div>
                             ) : (
-                                posts.map((post) => (
-                                    <article key={post.id} className="post-card">
-                                        <div className="post-header">
-                                            <div className="user-avatar" style={{ backgroundColor: `#${post.creator.slice(2, 8)}` }}>
-                                                {post.username ? post.username[0].toUpperCase() : 'A'}
-                                            </div>
-                                            <div className="post-content-wrapper">
-                                                <div className="post-meta">
-                                                    <span className="user-name">{post.username || 'Anonymous'}</span>
-                                                    <span className="user-handle">@{post.creator.slice(0, 6)}...{post.creator.slice(-4)}</span>
-                                                    <span className="post-dot">·</span>
-                                                    <span className="post-time">{formatDate(post.timestamp)}</span>
-                                                </div>
-                                                <p className="post-text">{post.caption}</p>
-                                                <div className="post-actions">
-                                                    <button className="action-button like-button">
-                                                        <Heart size={18} />
-                                                        <span>0</span>
-                                                    </button>
-                                                    <button className="action-button comment-button">
-                                                        <MessageCircle size={18} />
-                                                        <span>0</span>
-                                                    </button>
-                                                    <button className="action-button share-button">
-                                                        <Share2 size={18} />
-                                                        <span>0</span>
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </article>
-                                ))
-                            )
+                            posts.map((post, index) => (
+                                <PostCard key={post.id} post={post} />
+                            ))
                         )}
-                    </div>
                 </div>
             </main>
 
-            {/* Right Sidebar */}
-            <aside className="right-sidebar">
-                <div className="trending-container">
-                    <h3>Trending</h3>
+                {/* Right sidebar / Trending section */}
+                <aside className={`trending-sidebar ${animateContent ? 'animate-in' : ''}`}>
+                    <div className="trending-header">
+                        <h3>Trending Topics</h3>
+                    </div>
+                    
+                    <div className="trending-topics">
                     <div className="trending-item">
-                        <span className="trending-category">Blockchain</span>
+                            <TrendingUp size={16} />
+                            <div className="trend-info">
+                                <span className="trend-category">Blockchain</span>
                         <h4>#Ethereum</h4>
-                        <span className="trending-count">25.4K posts</span>
+                                <span className="trend-count">2.5K posts</span>
                     </div>
+                        </div>
+                        
                     <div className="trending-item">
-                        <span className="trending-category">Technology</span>
+                            <TrendingUp size={16} />
+                            <div className="trend-info">
+                                <span className="trend-category">Technology</span>
                         <h4>#Web3</h4>
-                        <span className="trending-count">18.2K posts</span>
+                                <span className="trend-count">1.8K posts</span>
                     </div>
+                        </div>
+                        
                     <div className="trending-item">
-                        <span className="trending-category">Cryptocurrency</span>
-                        <h4>#Bitcoin</h4>
-                        <span className="trending-count">12.9K posts</span>
+                            <TrendingUp size={16} />
+                            <div className="trend-info">
+                                <span className="trend-category">Cryptocurrency</span>
+                                <h4>#DeFi</h4>
+                                <span className="trend-count">1.2K posts</span>
                     </div>
+                        </div>
+                    </div>
+                    
+                    <div className="who-to-follow">
+                        <h3 className="who-to-follow-header">Who to follow</h3>
+                        
+                        {recommendedUsers.length === 0 ? (
+                            <div className="no-recommendations">
+                                <p>No recommendations available</p>
+                            </div>
+                        ) : (
+                            recommendedUsers.map((user, index) => (
+                                <div 
+                                    className={`suggested-user ${animateContent ? 'animate-user' : ''}`}
+                                    key={user.username || index}
+                                    style={{animationDelay: `${index * 0.1}s`}}
+                                >
+                                    <div className="user-avatar-container">
+                                        {user.username?.[0]?.toUpperCase() || 'U'}
+                                    </div>
+                                    <div className="user-info">
+                                        <h4>{user.username || 'User'}</h4>
+                                        <p>@{user.username?.toLowerCase().replace(/\s+/g, '_') || 'user'}</p>
+                                    </div>
+                                    <button 
+                                        className="follow-button" 
+                                        onClick={() => navigate(`/profile/${user.username}`)}
+                                    >
+                                        Follow
+                                    </button>
+                                </div>
+                            ))
+                        )}
+                    </div>
+                    
+                    <div className="activity-card">
+                        <h3>Your Activity</h3>
+                        <div className="activity-stats">
+                            <div className="activity-stat">
+                                <span className="stat-value">{userStats.posts}</span>
+                                <span className="stat-label">Posts</span>
+                            </div>
+                            <div className="activity-stat">
+                                <span className="stat-value">{userStats.followers}</span>
+                                <span className="stat-label">Followers</span>
+                            </div>
+                            <div className="activity-stat">
+                                <span className="stat-value">{userStats.following}</span>
+                                <span className="stat-label">Following</span>
+                            </div>
+                        </div>
+                        <button className="view-profile-btn" onClick={handleProfileClick}>
+                            View Profile
+                        </button>
+                    </div>
+                    
+                    <div className="footer-branding">
+                        <img src={LogoImage} alt="BlockConnect Logo" className="footer-logo"/>
+                        <p>© 2024 BlockConnect</p>
+                        <p>Decentralized Social Platform</p>
                 </div>
             </aside>
+            </div>
+
+            {/* Mobile Navigation for small screens */}
+            <div className="mobile-navbar">
+                <a href="/home" className="mobile-nav-item active">
+                    <Home size={22} />
+                    <span>Home</span>
+                </a>
+                <a href="/notifications" className="mobile-nav-item">
+                    <div className="nav-icon-container">
+                        <Bell size={22} />
+                        {followRequestCount > 0 && (
+                            <span className="notification-badge">{followRequestCount}</span>
+                        )}
+                    </div>
+                    <span>Notifications</span>
+                </a>
+                <a href="/messages" className="mobile-nav-item">
+                    <div className="nav-icon-container">
+                        <MessageSquare size={22} />
+                        {unreadMessages > 0 && (
+                            <span className="notification-badge">{unreadMessages}</span>
+                        )}
+                    </div>
+                    <span>Messages</span>
+                </a>
+                <a href="/profile" className="mobile-nav-item">
+                    <User size={22} />
+                    <span>Profile</span>
+                </a>
+            </div>
+
+            {selectedPost && (
+                <PostModal 
+                    post={selectedPost} 
+                    onClose={() => setSelectedPost(null)} 
+                    onLike={handleLike}
+                />
+            )}
         </div>
     );
 };

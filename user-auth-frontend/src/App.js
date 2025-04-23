@@ -11,6 +11,14 @@ import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast'; // For toast notifications
 import UserProfile from './Profile/UserProfile';
 import Notifications from './components/Notifications';
+import FollowRequests from './components/FollowRequests';
+import ProfilePage from './Profile/Profile';
+import NetworkStatus from './components/NetworkStatus';
+import MessagesPage from './components/Messages/MessagesPage';
+import NotificationsPage from './components/Notifications/NotificationsPage';
+import MobileAppBanner from './components/MobileAppBanner';
+import MobileNavBar from './components/MobileNavBar';
+import SearchPage from './components/SearchPage';
 
 function App() {
     const [account, setAccount] = useState(''); // Store the connected MetaMask account
@@ -74,6 +82,8 @@ function App() {
                 {/* Display error or success messages */}
                 {message && <p style={{ color: 'red', textAlign: 'center' }}>{message}</p>}
 
+                <NetworkStatus />
+
                 {/* Application Routes */}
                 <Routes>
                     {/* Landing Page (Default) */}
@@ -102,14 +112,6 @@ function App() {
                         />
                     } />
                     
-                    {/* Profile Page */}
-                    <Route path="/profile" element={
-                        <Profile 
-                            account={account} 
-                            web3={web3} 
-                        />
-                    } />
-                    
                     {/* CreatePost Page */}
                     <Route path="/createpost" element={
                         <CreatePost 
@@ -121,12 +123,27 @@ function App() {
                     {/* Data Control Page */}
                     <Route path="/data-control" element={<DataControl />} />
 
-                    {/* User Profile Page */}
+                    {/* Notifications Page */}
+                    <Route path="/notifications" element={<NotificationsPage />} />
+
+                    {/* Use ProfilePage for your own profile */}
+                    <Route path="/profile" element={<ProfilePage />} />
+                    
+                    {/* Use UserProfile for other users' profiles */}
                     <Route path="/profile/:username" element={<UserProfile />} />
 
-                    {/* Notifications Page */}
-                    <Route path="/notifications" element={<Notifications />} />
+                    {/* Messages Page */}
+                    <Route path="/messages" element={<MessagesPage />} />
+
+                    {/* Search Page */}
+                    <Route path="/search" element={<SearchPage />} />
                 </Routes>
+
+                {/* Mobile Navigation */}
+                <MobileNavBar />
+                
+                {/* Mobile App Banner */}
+                <MobileAppBanner />
             </div>
         </Router>
     );

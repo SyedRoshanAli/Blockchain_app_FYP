@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { useParams } from "react-router-dom";
-import { UserAuthContract, CreatePostContract } from "../UserAuth";
+import { useParams, useNavigate } from "react-router-dom";
+import { UserAuthContract, CreatePostContract, FollowRelationshipContract } from "../UserAuth";
 import { format } from 'date-fns';
 import { 
     Heart, 
@@ -15,344 +15,529 @@ import {
     MoreHorizontal,
     Image,
     FileText,
-    Bookmark
+    Bookmark,
+    ArrowLeft,
+    MessageSquare
 } from 'lucide-react';
 import { toast } from "react-hot-toast";
-import "./Profile.css";
+import "./UserProfile.css";
 import MessageModal from './MessageModal';
+import { messageService } from '../services/messageService';
 
 const UserProfile = () => {
-    const { username: encodedUsername } = useParams();
-    const username = decodeURIComponent(encodedUsername);
-    const [currentLoggedInUser, setCurrentLoggedInUser] = useState(null);
-    
-    const [userData, setUserData] = useState(null);
-    const [userPosts, setUserPosts] = useState([]);
+    const { username } = useParams();
+    const navigate = useNavigate();
+    const [profileData, setProfileData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [isFollowing, setIsFollowing] = useState(false);
-    const [stats, setStats] = useState({
-        followers: 0,
-        following: 0,
-        posts: 0
-    });
-    const [activeTab, setActiveTab] = useState('posts'); // posts, media, likes
+    const [userPosts, setUserPosts] = useState([]);
     const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
+    const [currentUser, setCurrentUser] = useState(null);
+    const [followStatus, setFollowStatus] = useState('none'); // 'none', 'requested', 'following'
+    const [stats, setStats] = useState({
+        posts: 0,
+        followers: 0,
+        following: 0
+    });
+    const [activeTab, setActiveTab] = useState('posts');
+    const [isFollowing, setIsFollowing] = useState(null); // 'pending', 'following', or null
 
     useEffect(() => {
-        const fetchUserData = async () => {
-            try {
-                // Get current user's address
-                const accounts = await window.ethereum.request({
-                    method: "eth_requestAccounts"
-                });
-                const currentAccount = accounts[0];
-                console.log('Current MetaMask account:', currentAccount);
-                
-                // Get current logged in username
-                const usernames = await UserAuthContract.methods
-                    .getUsernames(currentAccount)
-                    .call();
-                if (usernames && usernames.length > 0) {
-                    setCurrentLoggedInUser(usernames[0]);
-                    console.log('Currently logged in as:', usernames[0]);
-                }
-                
-                // Log the username from URL
-                console.log('Viewing profile of:', username);
-                
-                // Get address for the profile being viewed
-                const profileAddress = await UserAuthContract.methods
-                    .getAddressByUsername(username)
-                    .call();
-                console.log('Profile address:', profileAddress);
-                
-                if (profileAddress) {
-                    const userData = {
-                        username: username,
-                        address: profileAddress,
-                        about: `@${username}'s profile`
-                    };
-                    setUserData(userData);
-                    await fetchUserPosts(profileAddress);
-                } else {
-                    throw new Error("User not found");
-                }
-            } catch (error) {
-                console.error('Error fetching user data:', error);
-                setError(error.message);
-            } finally {
-                setLoading(false);
-            }
-        };
+        // Get current user data
+        const storedData = localStorage.getItem("userData");
+        if (storedData) {
+            setCurrentUser(JSON.parse(storedData));
+        }
 
-        fetchUserData();
+        fetchUserProfile();
     }, [username]);
 
-    const fetchUserPosts = async (userAddress) => {
+    useEffect(() => {
+        // Check follow status
+        const checkFollowStatus = () => {
+            const currentUserData = JSON.parse(localStorage.getItem("userData"));
+            
+            if (!currentUserData || !username) return;
+
+            const followedUsers = JSON.parse(localStorage.getItem('followedUsers') || '[]');
+            const outgoingRequests = JSON.parse(localStorage.getItem('outgoingFollowRequests') || '[]');
+            const sentRequest = outgoingRequests.some(req => 
+                req.from === currentUserData.username && req.to === username
+            );
+
+            const currentUsername = currentUserData.username;
+            const followersList = JSON.parse(localStorage.getItem(`followers_${currentUsername}`) || '[]');
+            const isFollower = followersList.includes(username);
+
+            if (followedUsers.includes(username) || isFollower) {
+                setFollowStatus('following');
+            } else if (sentRequest) {
+                setFollowStatus('requested');
+            } else {
+                setFollowStatus('none');
+            }
+        };
+        
+        checkFollowStatus();
+    }, [username]);
+
+    const fetchUserProfile = async () => {
         try {
-            const totalPosts = await CreatePostContract.methods
-                .postCounter()
+            setLoading(true);
+            setError(null);
+
+            // Get user's blockchain address by username
+            const userAddress = await UserAuthContract.methods
+                .getAddressByUsername(username)
                 .call();
 
-            console.log("Total posts:", totalPosts);
+            if (!userAddress) {
+                throw new Error("User not found");
+            }
 
-            const postIds = Array.from(
-                { length: Number(totalPosts) },
-                (_, i) => i + 1
-            );
-
-            const allPosts = await Promise.all(
-                postIds.map(async (postId) => {
-                    try {
-                        const post = await CreatePostContract.methods
-                            .getPost(postId)
-                            .call();
-
-                        // Compare addresses case-insensitively
-                        if (post.creator.toLowerCase() === userAddress.toLowerCase()) {
-                            console.log("Found post for user:", post);
-                            
-                            const response = await fetch(`http://127.0.0.1:8083/ipfs/${post.contentHash}`);
-                            if (!response.ok) throw new Error('Failed to fetch post data');
-                            
-                            const postData = await response.json();
-                            return {
-                                id: post.postId,
-                                creator: post.creator,
-                                ipfsHash: post.contentHash,
-                                timestamp: new Date(Number(post.timestamp) * 1000).toISOString(),
-                                ...postData
-                            };
-                        }
-                        return null;
-                    } catch (error) {
-                        console.error(`Error fetching post ${postId}:`, error);
-                        return null;
+            // Get current user's address
+            const accounts = await window.ethereum.request({
+                method: "eth_requestAccounts",
+            });
+            
+            // Check if currently following this user using blockchain
+            try {
+                const isFollowingOnChain = await FollowRelationshipContract.methods
+                    .isFollowing(accounts[0], userAddress)
+                    .call();
+                
+                if (isFollowingOnChain) {
+                    setFollowStatus('following');
+                } else {
+                    // Check if there's a pending request
+                    const pendingRequests = await FollowRelationshipContract.methods
+                        .getPendingRequests(userAddress)
+                        .call();
+                        
+                    const hasPendingRequest = pendingRequests.some(req => 
+                        req.from === accounts[0] && !req.accepted
+                    );
+                        
+                    if (hasPendingRequest) {
+                        setFollowStatus('requested');
+                    } else {
+                        setFollowStatus('none');
                     }
-                })
-            );
+                }
+            } catch (error) {
+                console.error("Error checking follow status on blockchain:", error);
+                
+                // Fallback to localStorage
+                const currentUserData = JSON.parse(localStorage.getItem("userData"));
+                if (!currentUserData) return;
+                
+                const followedUsers = JSON.parse(localStorage.getItem('followedUsers') || '[]');
+                
+                if (followedUsers.includes(username)) {
+                    setFollowStatus('following');
+                } else {
+                    const pendingOutgoingRequests = JSON.parse(localStorage.getItem('outgoingFollowRequests') || '[]');
+                    const hasPendingRequest = pendingOutgoingRequests.some(req => 
+                        req.from === currentUserData.username && req.to === username
+                    );
+                        
+                    setFollowStatus(hasPendingRequest ? 'requested' : 'none');
+                }
+            }
+            
+            // Get user's IPFS hashes
+            const ipfsHashes = await UserAuthContract.methods
+                .getUserHashes(userAddress)
+                .call();
 
-            const userPosts = allPosts
-                .filter(post => post !== null)
-                .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            if (!ipfsHashes || ipfsHashes.length === 0) {
+                throw new Error("No profile data found");
+            }
 
-            console.log("Filtered user posts:", userPosts);
-            setUserPosts(userPosts);
+            // Use the latest IPFS hash (most recent user data)
+            const latestHash = ipfsHashes[ipfsHashes.length - 1];
+
+            // Fetch user data from IPFS
+            const response = await fetch(`http://127.0.0.1:8083/ipfs/${latestHash}`);
+            if (!response.ok) {
+                throw new Error("Failed to fetch user data from IPFS");
+            }
+
+            const userData = await response.json();
+            
+            // Fetch user posts
+            await fetchUserPosts(userAddress);
+            
+            // Get follower and following counts from localStorage
+            const followersList = JSON.parse(localStorage.getItem(`followers_${username}`) || '[]');
+            const followingList = JSON.parse(localStorage.getItem(`following_${username}`) || '[]');
+            
+            // Also check followedUsers for backward compatibility
+            const followedUsers = JSON.parse(localStorage.getItem('followedUsers') || '[]');
+            
+            // If they've been using the old system, count this way
+            let followingCount = 0;
+            if (followingList.length === 0 && followedUsers.includes(username)) {
+                followingCount = 1; // At least you are following them
+            } else {
+                followingCount = followingList.length;
+            }
+            
+            // Set follower count
+            let followersCount = followersList.length;
+            
+            // Get registration timestamp from blockchain (if available)
+            let joinedDate = "April 2023"; // Default fallback
+            try {
+                // Try to get the registration timestamp from the user's first hash
+                if (ipfsHashes.length > 0) {
+                    const firstHash = ipfsHashes[0];
+                    const firstDataResponse = await fetch(`http://127.0.0.1:8083/ipfs/${firstHash}`);
+                    
+                    if (firstDataResponse.ok) {
+                        const firstData = await firstDataResponse.json();
+                        
+                        // If the firstData has a registrationTime, use it
+                        if (firstData.registrationTime) {
+                            joinedDate = new Date(firstData.registrationTime).toLocaleDateString('en-US', {
+                                month: 'long',
+                                year: 'numeric'
+                            });
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error("Error fetching join date:", err);
+            }
+
+            // Set complete profile data
+            setProfileData({
+                ...userData,
+                address: userAddress,
+                joinDate: userData.registrationTime ? new Date(userData.registrationTime).toLocaleDateString('en-US', {
+                    month: 'long',
+                    year: 'numeric'
+                }) : joinedDate
+            });
+
+            // Update stats with real data
+            setStats({
+                posts: userPosts.length,
+                followers: followersCount,
+                following: followingCount
+            });
+
         } catch (error) {
-            console.error("Error fetching user posts:", error);
-            setError("Failed to load posts");
+            console.error("Error fetching user profile:", error);
+            setError(error.message || "Failed to load profile");
+            toast.error(error.message || "Failed to load profile");
+        } finally {
+            setLoading(false);
         }
     };
 
-    const handleFollow = () => {
-        setIsFollowing(!isFollowing);
-        toast.success(isFollowing ? 'Unfollowed successfully' : 'Followed successfully');
+    const fetchUserPosts = async (userAddress) => {
+        try {
+            // Get user's post IDs
+            const postIds = await CreatePostContract.methods
+                .getPostsByUser(userAddress)
+                .call();
+
+            if (!postIds || postIds.length === 0) {
+                return;
+            }
+
+            // Fetch details for each post
+            const posts = await Promise.all(
+                postIds.map(async (postId) => {
+                    const post = await CreatePostContract.methods
+                        .getPost(postId)
+                        .call();
+
+                    // Fetch post content from IPFS
+                    const response = await fetch(`http://127.0.0.1:8083/ipfs/${post.contentHash}`);
+                    if (!response.ok) {
+                        throw new Error(`Failed to fetch post ${postId} content from IPFS`);
+                    }
+
+                    const postData = await response.json();
+                    return {
+                        id: post.postId,
+                        timestamp: new Date(Number(post.timestamp) * 1000),
+                        ...postData,
+                        likes: Math.floor(Math.random() * 15), // Dummy data for display
+                        comments: Math.floor(Math.random() * 5) // Dummy data for display
+                    };
+                })
+            );
+
+            // Sort by most recent
+            posts.sort((a, b) => b.timestamp - a.timestamp);
+            setUserPosts(posts);
+
+        } catch (error) {
+            console.error("Error fetching user posts:", error);
+            toast.error("Failed to load user posts");
+        }
     };
 
-    const handleMessageClick = () => {
-        console.log('Opening message modal for recipient:', username);
-        setIsMessageModalOpen(true);
+    const handleFollow = async () => {
+        try {
+            // First check if we already have a pending request on the blockchain
+            const accounts = await window.ethereum.request({
+                method: "eth_requestAccounts"
+            });
+            
+            // Get recipient's blockchain address
+            let targetAddress;
+            try {
+                targetAddress = await UserAuthContract.methods
+                    .getAddressByUsername(username)
+                    .call();
+                
+                if (!targetAddress) {
+                    toast.error(`Could not find blockchain address for ${username}`);
+                    return;
+                }
+                
+                // Check on the blockchain if request is already pending
+                const pendingRequests = await FollowRelationshipContract.methods
+                    .getPendingRequests(targetAddress)
+                    .call();
+                    
+                const hasPendingRequest = pendingRequests.some(req => 
+                    req.from.toLowerCase() === accounts[0].toLowerCase() && !req.accepted
+                );
+                    
+                if (hasPendingRequest) {
+                    // Update both UI and localStorage to match blockchain state
+                    toast.info("You already have a pending follow request to this user");
+                    setFollowStatus('requested');
+                    
+                    // Rest of your existing code to update localStorage...
+                    return; // Exit early
+                }
+            } catch (error) {
+                console.error("Error checking existing requests:", error);
+                // Continue with local storage approach if blockchain check fails
+            }
+            
+            // Rest of your existing function...
+        } catch (error) {
+            // ...
+        }
     };
 
-    const handleNotification = () => {
-        toast.success(
-            `${isFollowing ? 'Disabled' : 'Enabled'} notifications for ${username}`
+    const handleMessage = () => {
+        if (profileData && profileData.username) {
+            // Navigate to messages page and provide the username to start a chat with
+            navigate(`/messages?user=${profileData.username}`);
+        } else {
+            toast.error("Cannot start a conversation with this user");
+        }
+    };
+
+    const formatDate = (date) => {
+        return new Intl.DateTimeFormat('en-US', {
+            month: 'short',
+            day: 'numeric', 
+            year: 'numeric'
+        }).format(date);
+    };
+
+    const formatTimestamp = (timestamp) => {
+        const now = new Date();
+        const diff = now - timestamp;
+        
+        const seconds = Math.floor(diff / 1000);
+        if (seconds < 60) return `${seconds}s`;
+        
+        const minutes = Math.floor(diff / (1000 * 60));
+        if (minutes < 60) return `${minutes}m`;
+        
+        const hours = Math.floor(diff / (1000 * 60 * 60));
+        if (hours < 24) return `${hours}h`;
+        
+        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+        if (days < 7) return `${days}d`;
+        
+        return formatDate(timestamp);
+    };
+
+    if (loading) {
+        return (
+            <div className="user-profile-container">
+                <div className="profile-loading">
+                    <div className="spinner"></div>
+                    <p>Loading profile...</p>
+                </div>
+            </div>
         );
-    };
+    }
 
-    if (loading) return <div className="loading">Loading profile...</div>;
-    if (error) return <div className="error">{error}</div>;
+    if (error) {
+        return (
+            <div className="user-profile-container">
+                <div className="profile-error">
+                    <h3>Error loading profile</h3>
+                    <p>{error}</p>
+                    <button onClick={() => navigate('/home')}>Return to Home</button>
+                </div>
+            </div>
+        );
+    }
 
     return (
-        <div className="profile-container">
-            {currentLoggedInUser && (
-                <div className="logged-in-status">
-                    Logged in as: {currentLoggedInUser}
+        <div className="user-profile-container">
+            {/* Header with back button */}
+            <header className="user-profile-header">
+                <button className="back-button" onClick={() => navigate(-1)}>
+                    <ArrowLeft size={20} />
+                </button>
+                <div className="header-user-info">
+                    <h2>{username}</h2>
+                    <span>{userPosts.length} posts</span>
                 </div>
-            )}
-            <div className="profile-page">
-                {/* Cover Image */}
-                <div className="profile-cover">
-                    <div 
-                        className="cover-image"
-                        style={{ 
-                            backgroundColor: `#${userData?.address.slice(2, 8)}40`
-                        }}
-                    />
+            </header>
+
+            {/* Main profile content */}
+            <div className="user-profile-content">
+                {/* Banner image */}
+                <div className="user-profile-banner" 
+                    style={{ backgroundImage: `url('https://images.unsplash.com/photo-1579546929518-9e396f3cc809?q=80&w=2070&auto=format&fit=crop')` }}>
                 </div>
 
-                {/* Profile Header */}
-                <div className="profile-header">
-                    <div className="profile-avatar-wrapper">
-                        <div 
-                            className="profile-avatar large"
-                            style={{ backgroundColor: `#${userData?.address.slice(2, 8)}` }}
-                        >
-                            {userData?.username[0].toUpperCase()}
+                {/* Profile info section */}
+                <div className="user-profile-info">
+                    <div className="user-avatar-section">
+                        <div className="user-avatar">
+                            {username[0].toUpperCase()}
                         </div>
                     </div>
 
-                    <div className="profile-actions">
+                    <div className="user-profile-actions">
                         <button 
-                            className="action-button"
-                            onClick={() => toast.info('Share profile coming soon!')}
-                        >
-                            <Share2 size={20} />
-                        </button>
-                        <button 
-                            className="action-button"
-                            onClick={handleMessageClick}
-                        >
-                            <Mail size={20} />
-                        </button>
-                        <button 
-                            className="action-button"
-                            onClick={handleNotification}
-                        >
-                            <Bell size={20} />
-                        </button>
-                        <button 
-                            className={`follow-button ${isFollowing ? 'following' : ''}`}
+                            className={`follow-button ${followStatus !== 'none' ? 'active' : ''}`} 
                             onClick={handleFollow}
                         >
-                            {isFollowing ? (
-                                'Following'
-                            ) : (
-                                <>
-                                    <UserPlus size={20} />
-                                    Follow
-                                </>
-                            )}
+                            {followStatus === 'following' ? 'Following' : 
+                             followStatus === 'requested' ? 'Requested' : 'Follow'}
                         </button>
+                        
+                        <button className="message-button" onClick={handleMessage}>
+                            <MessageSquare size={18} />
+                            <span>Message</span>
+                        </button>
+                        
+                        <div className="secondary-actions">
+                            <button className="action-btn">
+                                <Bell size={18} />
+                            </button>
+                            <button className="action-btn">
+                                <MoreHorizontal size={18} />
+                            </button>
+                        </div>
                     </div>
                 </div>
 
-                {/* Profile Info */}
-                <div className="profile-info">
-                    <h1 className="profile-name">{userData?.username}</h1>
-                    <p className="profile-handle">@{userData?.address.slice(0, 6)}...{userData?.address.slice(-4)}</p>
+                {/* User details */}
+                <div className="user-details">
+                    <h1 className="user-name">{username}</h1>
+                    <p className="user-handle">@{username.toLowerCase().replace(/\s+/g, '_')}</p>
                     
-                    <p className="profile-bio">
-                        {userData?.about || "No bio available"}
+                    <p className="user-bio">
+                        {profileData?.bio || `Welcome to ${username}'s profile on BlockConnect!`}
                     </p>
-
-                    <div className="profile-meta">
-                        <span className="meta-item">
-                            <MapPin size={16} />
-                            Web3 World
-                        </span>
-                        <span className="meta-item">
-                            <LinkIcon size={16} />
-                            <a href="#" className="profile-link">blockconnect.web3</a>
-                        </span>
+                    
+                    <div className="user-meta">
                         <span className="meta-item">
                             <Calendar size={16} />
-                            Joined {format(new Date(), 'MMMM yyyy')}
+                            Joined {profileData?.joinDate || "April 2023"}
                         </span>
                     </div>
-
-                    <div className="profile-stats">
-                        <span className="stat-item">
-                            <strong>{userPosts.length}</strong> Posts
-                        </span>
-                        <span className="stat-item">
-                            <strong>{stats.followers}</strong> Followers
-                        </span>
-                        <span className="stat-item">
-                            <strong>{stats.following}</strong> Following
-                        </span>
+                    
+                    <div className="user-stats">
+                        <div className="stat-item">
+                            <span className="stat-value">{userPosts.length}</span>
+                            <span className="stat-label">Posts</span>
+                        </div>
+                        <div className="stat-item">
+                            <span className="stat-value">{stats.followers}</span>
+                            <span className="stat-label">Followers</span>
+                        </div>
+                        <div className="stat-item">
+                            <span className="stat-value">{stats.following}</span>
+                            <span className="stat-label">Following</span>
+                        </div>
                     </div>
                 </div>
 
-                {/* Profile Tabs */}
-                <div className="profile-tabs">
-                    <button 
-                        className={`tab ${activeTab === 'posts' ? 'active' : ''}`}
-                        onClick={() => setActiveTab('posts')}
-                    >
-                        <FileText size={20} />
-                        Posts
-                    </button>
-                    <button 
-                        className={`tab ${activeTab === 'media' ? 'active' : ''}`}
-                        onClick={() => setActiveTab('media')}
-                    >
-                        <Image size={20} />
-                        Media
-                    </button>
-                    <button 
-                        className={`tab ${activeTab === 'likes' ? 'active' : ''}`}
-                        onClick={() => setActiveTab('likes')}
-                    >
-                        <Heart size={20} />
-                        Likes
-                    </button>
-                    <button 
-                        className={`tab ${activeTab === 'bookmarks' ? 'active' : ''}`}
-                        onClick={() => setActiveTab('bookmarks')}
-                    >
-                        <Bookmark size={20} />
-                        Bookmarks
-                    </button>
+                {/* Tabs */}
+                <div className="user-profile-tabs">
+                    <button className="tab active">Posts</button>
+                    <button className="tab">Media</button>
+                    <button className="tab">Likes</button>
                 </div>
 
-                {/* Posts Section */}
-                <div className="profile-posts">
+                {/* Posts section */}
+                <div className="user-posts-section">
                     {userPosts.length === 0 ? (
                         <div className="no-posts">
-                            <FileText size={48} />
-                            <h3>No posts yet</h3>
-                            <p>When {userData?.username} posts, you'll see their posts here.</p>
+                            <p>No posts yet</p>
                         </div>
                     ) : (
-                        userPosts.map(post => (
-                            <article key={post.id} className="post-card">
-                                <div className="post-header">
-                                    <div 
-                                        className="user-avatar"
-                                        style={{ backgroundColor: `#${post.creator.slice(2, 8)}` }}
-                                    >
-                                        {userData?.username[0].toUpperCase()}
-                                    </div>
-                                    <div className="post-content-wrapper">
+                        <div className="posts-list">
+                            {userPosts.map((post) => (
+                                <div className="post-card" key={post.id}>
+                                    <div className="post-header">
+                                        <div className="post-avatar">
+                                            {username[0].toUpperCase()}
+                                        </div>
                                         <div className="post-meta">
-                                            <span className="user-name">{userData?.username}</span>
-                                            <span className="user-handle">@{post.creator.slice(0, 6)}...{post.creator.slice(-4)}</span>
-                                            <span className="post-dot">·</span>
-                                            <span className="post-time">{format(new Date(post.timestamp), 'MMM d, yyyy h:mm a')}</span>
+                                            <div className="post-user-info">
+                                                <h4>{username}</h4>
+                                                <span className="post-handle">@{username.toLowerCase().replace(/\s+/g, '_')}</span>
+                                                <span className="post-time">· {formatTimestamp(post.timestamp)}</span>
+                                            </div>
+                                            <p className="post-caption">{post.caption}</p>
                                         </div>
-                                        <p className="post-text">{post.caption}</p>
-                                        <div className="post-actions">
-                                            <button className="action-button like-button">
-                                                <Heart size={18} />
-                                                <span>0</span>
-                                            </button>
-                                            <button className="action-button comment-button">
-                                                <MessageCircle size={18} />
-                                                <span>0</span>
-                                            </button>
-                                            <button className="action-button share-button">
-                                                <Share2 size={18} />
-                                                <span>0</span>
-                                            </button>
-                                            <button className="action-button more-button">
-                                                <MoreHorizontal size={18} />
-                                            </button>
+                                    </div>
+                                    
+                                    {post.image && (
+                                        <div className="post-image">
+                                            <img src={post.image} alt={post.caption || 'Post image'} />
                                         </div>
+                                    )}
+                                    
+                                    <div className="post-actions">
+                                        <button className="action-button">
+                                            <Heart size={18} />
+                                            <span>{post.likes}</span>
+                                        </button>
+                                        <button className="action-button">
+                                            <MessageCircle size={18} />
+                                            <span>{post.comments}</span>
+                                        </button>
+                                        <button className="action-button">
+                                            <Share2 size={18} />
+                                        </button>
+                                        <button className="action-button bookmark">
+                                            <Bookmark size={18} />
+                                        </button>
                                     </div>
                                 </div>
-                            </article>
-                        ))
+                            ))}
+                        </div>
                     )}
                 </div>
-
-                <MessageModal 
-                    isOpen={isMessageModalOpen}
-                    onClose={() => setIsMessageModalOpen(false)}
-                    recipient={username}
-                />
             </div>
+
+            {/* Message Modal */}
+            <MessageModal
+                isOpen={isMessageModalOpen}
+                onClose={() => setIsMessageModalOpen(false)}
+                recipient={username}
+            />
         </div>
     );
 };

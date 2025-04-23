@@ -10,6 +10,9 @@
 // To learn more about the benefits of this model and instructions on how to
 // opt-in, read https://cra.link/PWA
 
+// This code is used to register a service worker and handle push notifications
+
+// Check if the browser supports service workers
 const isLocalhost = Boolean(
   window.location.hostname === 'localhost' ||
     // [::1] is the IPv6 localhost address.
@@ -18,44 +21,28 @@ const isLocalhost = Boolean(
     window.location.hostname.match(/^127(?:\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}$/)
 );
 
-export function register(config) {
-  if (process.env.NODE_ENV === 'production' && 'serviceWorker' in navigator) {
-    // The URL constructor is available in all browsers that support SW.
-    const publicUrl = new URL(process.env.PUBLIC_URL, window.location.href);
-    if (publicUrl.origin !== window.location.origin) {
-      // Our service worker won't work if PUBLIC_URL is on a different origin
-      // from what our page is served on. This might happen if a CDN is used to
-      // serve assets; see https://github.com/facebook/create-react-app/issues/2374
-      return;
-    }
+// The URL of our service worker
+const swUrl = `${process.env.PUBLIC_URL}/sw.js`;
 
+export function register() {
+  if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      const swUrl = `${process.env.PUBLIC_URL}/service-worker.js`;
-
-      if (isLocalhost) {
-        // This is running on localhost. Let's check if a service worker still exists or not.
-        checkValidServiceWorker(swUrl, config);
-
-        // Add some additional logging to localhost, pointing developers to the
-        // service worker/PWA documentation.
-        navigator.serviceWorker.ready.then(() => {
-          console.log(
-            'This web app is being served cache-first by a service ' +
-              'worker. To learn more, visit https://cra.link/PWA'
-          );
-        });
+      if (!isLocalhost) {
+        // Production registration
+        registerValidSW(swUrl);
       } else {
-        // Is not localhost. Just register service worker
-        registerValidSW(swUrl, config);
+        // Development (localhost) registration
+        checkValidServiceWorker(swUrl);
       }
     });
   }
 }
 
-function registerValidSW(swUrl, config) {
+function registerValidSW(swUrl) {
   navigator.serviceWorker
     .register(swUrl)
-    .then((registration) => {
+    .then(registration => {
+      // Handle updates
       registration.onupdatefound = () => {
         const installingWorker = registration.installing;
         if (installingWorker == null) {
@@ -64,59 +51,50 @@ function registerValidSW(swUrl, config) {
         installingWorker.onstatechange = () => {
           if (installingWorker.state === 'installed') {
             if (navigator.serviceWorker.controller) {
-              // At this point, the updated precached content has been fetched,
-              // but the previous service worker will still serve the older
-              // content until all client tabs are closed.
+              // At this point, the updated content has been fetched
               console.log(
-                'New content is available and will be used when all ' +
-                  'tabs for this page are closed. See https://cra.link/PWA.'
+                'New content is available and will be used when all tabs for this page are closed.'
               );
-
-              // Execute callback
-              if (config && config.onUpdate) {
-                config.onUpdate(registration);
-              }
             } else {
-              // At this point, everything has been precached.
-              // It's the perfect time to display a
-              // "Content is cached for offline use." message.
+              // At this point, everything has been precached
               console.log('Content is cached for offline use.');
-
-              // Execute callback
-              if (config && config.onSuccess) {
-                config.onSuccess(registration);
-              }
             }
           }
         };
       };
+      
+      // Handle push notifications once service worker is registered
+      setupPushNotifications(registration);
+      
+      return registration;
     })
-    .catch((error) => {
+    .catch(error => {
       console.error('Error during service worker registration:', error);
     });
 }
 
-function checkValidServiceWorker(swUrl, config) {
-  // Check if the service worker can be found. If it can't reload the page.
+// Check if the service worker can be found
+function checkValidServiceWorker(swUrl) {
+  // Check if the service worker can be found
   fetch(swUrl, {
-    headers: { 'Service-Worker': 'script' },
+    headers: { 'Service-Worker': 'script' }
   })
-    .then((response) => {
-      // Ensure service worker exists, and that we really are getting a JS file.
+    .then(response => {
+      // Ensure service worker exists
       const contentType = response.headers.get('content-type');
       if (
         response.status === 404 ||
         (contentType != null && contentType.indexOf('javascript') === -1)
       ) {
-        // No service worker found. Probably a different app. Reload the page.
-        navigator.serviceWorker.ready.then((registration) => {
+        // No service worker found, reload the page
+        navigator.serviceWorker.ready.then(registration => {
           registration.unregister().then(() => {
             window.location.reload();
           });
         });
       } else {
-        // Service worker found. Proceed as normal.
-        registerValidSW(swUrl, config);
+        // Service worker found, proceed as normal
+        registerValidSW(swUrl);
       }
     })
     .catch(() => {
@@ -124,13 +102,86 @@ function checkValidServiceWorker(swUrl, config) {
     });
 }
 
+// Setup push notifications when user is logged in
+async function setupPushNotifications(registration) {
+  try {
+    // Check if we have permission
+    if (!('Notification' in window)) {
+      console.log('This browser does not support notifications');
+      return;
+    }
+    
+    // Request permission (wait until user is logged in)
+    const userData = JSON.parse(localStorage.getItem('userData') || '{}');
+    if (!userData.walletAddress) {
+      // Not logged in, don't request permission yet
+      return;
+    }
+    
+    // Request notification permission
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      console.log('Notification permission not granted');
+      return;
+    }
+    
+    // Check if push manager is available
+    if (!('PushManager' in window)) {
+      console.log('Push API not supported');
+      return;
+    }
+    
+    // Get VAPID key (you would need to set this up on your server)
+    const vapidPublicKey = 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U';
+    
+    // Convert the VAPID key to the format required by the subscription
+    const convertedVapidKey = urlBase64ToUint8Array(vapidPublicKey);
+    
+    // Subscribe to push notifications
+    try {
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: convertedVapidKey
+      });
+      
+      console.log('Push notification subscription:', subscription);
+      
+      // Send subscription to your server
+      // await saveSubscription(subscription);
+      
+      // Store in localStorage for now (in production, send to server)
+      localStorage.setItem('pushSubscription', JSON.stringify(subscription));
+    } catch (error) {
+      console.error('Failed to subscribe to push notifications:', error);
+    }
+  } catch (error) {
+    console.error('Error setting up notifications:', error);
+  }
+}
+
+// Helper function to convert base64 string to Uint8Array
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding)
+    .replace(/-/g, '+')
+    .replace(/_/g, '/');
+
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
 export function unregister() {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.ready
-      .then((registration) => {
+      .then(registration => {
         registration.unregister();
       })
-      .catch((error) => {
+      .catch(error => {
         console.error(error.message);
       });
   }

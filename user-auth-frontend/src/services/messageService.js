@@ -137,6 +137,20 @@ class MessageService {
             throw error;
         }
     }
+
+    async deleteMessage(messageId) {
+        try {
+            const accounts = await window.ethereum.request({
+                method: "eth_requestAccounts"
+            });
+            
+            return await this.contract.methods.deleteMessage(messageId)
+                .send({ from: accounts[0] });
+        } catch (error) {
+            console.error("Error deleting message:", error);
+            throw error;
+        }
+    }
 }
 
 export const messageService = new MessageService(); 

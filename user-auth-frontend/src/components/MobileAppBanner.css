@@ -1,0 +1,83 @@
+.mobile-app-banner {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background-color: var(--primary-color, #6366f1);
+  color: white;
+  padding: 12px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 1000;
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.banner-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.banner-text p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.banner-actions {
+  display: flex;
+  align-items: center;
+}
+
+.install-button {
+  background: white;
+  color: var(--primary-color, #6366f1);
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-weight: 600;
+  margin-right: 8px;
+  cursor: pointer;
+}
+
+.dismiss-button {
+  background: transparent;
+  border: none;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.dismiss-button:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Add to App.css or index.css to handle PWA installed view */
+@media (display-mode: standalone) {
+  body {
+    /* Remove browser UI elements padding when in standalone mode */
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  
+  /* Add bottom padding for mobile nav */
+  .main-content {
+    padding-bottom: 70px;
+  }
+}
+
+/* iOS status bar handling */
+@supports (-webkit-touch-callout: none) {
+  /* CSS specific to iOS devices */
+  @media (display-mode: standalone) {
+    body {
+      /* Ensure content starts below iOS status bar */
+      padding-top: env(safe-area-inset-top);
+    }
+  }
+} 

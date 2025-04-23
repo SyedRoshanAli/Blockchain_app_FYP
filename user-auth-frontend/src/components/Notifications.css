@@ -159,4 +159,31 @@
 
 :root[data-theme='dark'] .notification-item.unread {
     background: var(--dark-hover-background);
+}
+
+.post-preview {
+    font-size: 14px;
+    color: var(--text-secondary, #666);
+    margin: 8px 0 12px 0;
+    padding: 12px 14px;
+    background-color: rgba(0, 0, 0, 0.05);
+    border-radius: 8px;
+    border-left: 4px solid #3b82f6;
+    line-height: 1.5;
+    font-weight: normal;
+    font-style: italic;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    max-width: 100%;
+    word-break: break-word;
+}
+
+.dark-mode .post-preview {
+    background-color: rgba(255, 255, 255, 0.08);
+    border-left: 4px solid #818cf8;
+    color: var(--text-secondary, #aaa);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.notification-message {
+    margin-bottom: 4px;
 } 

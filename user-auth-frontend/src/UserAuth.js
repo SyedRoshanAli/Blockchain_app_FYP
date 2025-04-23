@@ -1,10 +1,12 @@
 import Web3 from "web3";
 import UserAuthABI from "./artifacts/UserAuth.json"; // Path to UserAuth ABI
 import CreatePostABI from "./artifacts/CreatePost.json"; // Path to CreatePost ABI
+import FollowRelationshipABI from "./artifacts/FollowRelationship.json";
 
-// Deployed contract addresses
-const userAuthAddress = "0xCB216DA1Bdb7F4D127282ADDb436A99BF236D5E0"; // UserAuth address
-const createPostAddress = "0x4907bf9b75bD2447bD140bD8c14259F152abeC9b"; // CreatePost address
+// Updated contract addresses
+const userAuthAddress = "0x158d4b326966332821D139b56d563c9D7061917a"; // New UserAuth address
+const createPostAddress = "0xF570A3256081Aab52225CBeDE01c4d892CcDA61d"; // New CreatePost address
+const followRelationshipAddress = "0x31b87943aBb3C830D97B62Af84E66e7ee13e1B1B"; // New FollowRelationship address
 
 // Web3 setup
 const web3 = new Web3(Web3.givenProvider || "http://localhost:7545");
@@ -442,5 +444,6 @@ const UserAuthContract = new web3.eth.Contract([
     }
 ], userAuthAddress);
 const CreatePostContract = new web3.eth.Contract(CreatePostABI.abi, createPostAddress);
+const FollowRelationshipContract = new web3.eth.Contract(FollowRelationshipABI.abi, followRelationshipAddress);
 
-export { UserAuthContract, CreatePostContract };
+export { UserAuthContract, CreatePostContract, FollowRelationshipContract };
