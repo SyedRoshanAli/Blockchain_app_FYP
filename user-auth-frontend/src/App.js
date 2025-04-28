@@ -19,11 +19,13 @@ import NotificationsPage from './components/Notifications/NotificationsPage';
 import MobileAppBanner from './components/MobileAppBanner';
 import MobileNavBar from './components/MobileNavBar';
 import SearchPage from './components/SearchPage';
+import AnalyticsPage from './components/Analytics/AnalyticsPage';
 
 function App() {
     const [account, setAccount] = useState(''); // Store the connected MetaMask account
     const [web3, setWeb3] = useState(null); // Web3 instance
     const [message, setMessage] = useState(''); // State for error/success messages
+    const [isAuthenticated, setIsAuthenticated] = useState(false);
 
     // Function to initialize MetaMask and Web3
     const loadWeb3 = async () => {
@@ -43,6 +45,7 @@ function App() {
                 if (accounts.length > 0) {
                     setAccount(accounts[0]); // Set the connected account
                     console.log('MetaMask connected, account:', accounts[0]);
+                    setIsAuthenticated(true);
                 } else {
                     setMessage('No accounts found. Please log in to MetaMask.');
                 }
@@ -53,9 +56,11 @@ function App() {
                         setAccount(newAccounts[0]);
                         setMessage(''); // Clear messages
                         console.log('Account changed:', newAccounts[0]);
+                        setIsAuthenticated(true);
                     } else {
                         setAccount('');
                         setMessage('MetaMask account disconnected.');
+                        setIsAuthenticated(false);
                     }
                 });
             } catch (error) {
@@ -72,6 +77,20 @@ function App() {
     useEffect(() => {
         loadWeb3();
     }, []);
+
+    const handleLogout = () => {
+        if (account) {
+            localStorage.removeItem(`auth_${account}`);
+        }
+        setIsAuthenticated(false);
+    };
+
+    const handleAuthenticated = () => {
+        if (account) {
+            localStorage.setItem(`auth_${account}`, 'true');
+            setIsAuthenticated(true);
+        }
+    };
 
     return (
         <Router>
@@ -137,6 +156,9 @@ function App() {
 
                     {/* Search Page */}
                     <Route path="/search" element={<SearchPage />} />
+
+                    {/* Analytics Page */}
+                    <Route path="/analytics" element={<AnalyticsPage />} />
                 </Routes>
 
                 {/* Mobile Navigation */}

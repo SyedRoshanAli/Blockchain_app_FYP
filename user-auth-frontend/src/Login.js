@@ -32,6 +32,7 @@ import {
     VpnKey
 } from "@mui/icons-material";
 import LogoImage from './logo.png'; // Make sure the path is correct for your project structure
+import { IPFS_GATEWAY } from './ipfs';
 
 // Styled Components with modern aesthetics
 const LoginContainer = styled(Container)(({ theme }) => ({
@@ -140,8 +141,8 @@ const LogoTypography = styled(Box)({
     alignItems: "center",
     fontSize: "1.5rem",
     "& img": {
-        width: "40px",
-        height: "40px",
+        width: "50px",
+        height: "50px",
         marginRight: "10px",
         borderRadius: "50%",
         boxShadow: "0 2px 8px rgba(0, 0, 0, 0.2)",
@@ -150,11 +151,11 @@ const LogoTypography = styled(Box)({
 });
 
 const MessageText = styled(Typography)(({ success }) => ({
-    color: '#ef4444',
+    color: success ? '#10b981' : '#ef4444',
     textAlign: 'center',
     padding: '0.75rem',
     borderRadius: '8px',
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    backgroundColor: success ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
     marginTop: '1rem',
     width: '100%',
     animation: 'pulse 2s infinite',
@@ -228,7 +229,12 @@ const Login = () => {
         email: "",
         password: "",
     });
+    const [errors, setErrors] = useState({
+        email: false,
+        password: false
+    });
     const [message, setMessage] = useState("");
+    const [messageType, setMessageType] = useState("error");
     const [loading, setLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
     const [animate, setAnimate] = useState(false);
@@ -237,27 +243,90 @@ const Login = () => {
 
     useEffect(() => {
         setAnimate(true);
-    }, []);
+        
+        // Check if user is already logged in
+        const userData = localStorage.getItem('userData');
+        const userSession = localStorage.getItem('userSession');
+        
+        if (userData && userSession) {
+            try {
+                // Parse the data to ensure it's valid
+                const parsedUserData = JSON.parse(userData);
+                const parsedSession = JSON.parse(userSession);
+                
+                if (parsedUserData.email && parsedSession.address) {
+                    // Attempt to auto-login if data is valid
+                    navigate("/home");
+                }
+            } catch (err) {
+                console.error("Invalid user data in localStorage:", err);
+                // Clear invalid data
+                localStorage.removeItem('userData');
+                localStorage.removeItem('userSession');
+            }
+        }
+    }, [navigate]);
 
     const handleInputChange = (e) => {
         const { name, value } = e.target;
         setFormData({ ...formData, [name]: value });
+        
+        // Clear errors when user types
+        if (errors[name]) {
+            setErrors({...errors, [name]: false});
+        }
     };
 
     const handleClickShowPassword = () => {
         setShowPassword(!showPassword);
     };
 
+    // Save the user's wallet address in userData for easier access
+    const saveWalletAddressToUserData = async () => {
+        try {
+            // Get the current wallet address from MetaMask
+            const accounts = await window.ethereum.request({
+                method: "eth_requestAccounts"
+            });
+            const address = accounts[0].toLowerCase();
+            
+            // Update userData
+            const userData = JSON.parse(localStorage.getItem('userData') || '{}');
+            userData.walletAddress = address;
+            localStorage.setItem('userData', JSON.stringify(userData));
+            
+            // Also update userSession for redundancy
+            const userSession = JSON.parse(localStorage.getItem('userSession') || '{}');
+            userSession.address = address;
+            localStorage.setItem('userSession', JSON.stringify(userSession));
+            
+            console.log("Login: Saved wallet address to user data:", address);
+        } catch (error) {
+            console.error("Error saving wallet address:", error);
+        }
+    };
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         
+        let hasErrors = false;
+        const newErrors = { email: false, password: false };
+        
         if (!validateEmail(formData.email)) {
-            setMessage("Please enter a valid email address");
-            return;
+            newErrors.email = true;
+            hasErrors = true;
         }
         
         if (!formData.password) {
-            setMessage("Please enter your password");
+            newErrors.password = true;
+            hasErrors = true;
+        }
+        
+        setErrors(newErrors);
+        
+        if (hasErrors) {
+            setMessage("Please correct the errors in the form");
+            setMessageType("error");
             return;
         }
         
@@ -273,17 +342,46 @@ const Login = () => {
                 method: "eth_requestAccounts",
             });
 
+            // First try: check in localStorage for registered users
+            // This approach bypasses the need for IPFS in local development
+            const bypassIPFSForLocalhost = window.location.hostname === 'localhost';
+            let foundUser = null;
+            
+            // Try localStorage first (much faster and works offline)
+            try {
+                const storedUserData = localStorage.getItem('userData');
+                if (storedUserData) {
+                    const userData = JSON.parse(storedUserData);
+                    if (userData.email === formData.email) {
+                        foundUser = userData;
+                        console.log("Found user in localStorage");
+                    }
+                }
+            } catch (error) {
+                console.error("Error checking localStorage:", error);
+            }
+            
+            // If not found in localStorage and not on localhost, try IPFS
+            if (!foundUser && !bypassIPFSForLocalhost) {
+                try {
             // Get all users' IPFS hashes
             const allHashes = await UserAuthContract.methods
                 .getAllUserHashes()
                 .call();
 
-            let foundUser = null;
-
             // Check each hash for matching email
             for (const hash of allHashes) {
                 try {
-                    const response = await fetch(`http://127.0.0.1:8083/ipfs/${hash}`);
+                            // Use a timeout to prevent long-running requests
+                            const timeoutPromise = new Promise((_, reject) => 
+                                setTimeout(() => reject(new Error("IPFS request timeout")), 5000)
+                            );
+                            
+                            const fetchPromise = fetch(`${IPFS_GATEWAY}/${hash}`);
+                            
+                            // Race between fetch and timeout
+                            const response = await Promise.race([fetchPromise, timeoutPromise]);
+                            
                     if (!response.ok) continue;
                     
                     const userData = await response.json();
@@ -292,9 +390,26 @@ const Login = () => {
                         break;
                     }
                 } catch (error) {
-                    console.error("Error fetching user data:", error);
+                            console.error(`Error fetching hash ${hash}:`, error);
                     continue;
                 }
+                    }
+                } catch (error) {
+                    console.error("Error getting IPFS hashes:", error);
+                }
+            }
+            
+            // If still not found and we're in localhost, allow direct login
+            if (!foundUser && bypassIPFSForLocalhost) {
+                console.log("Development mode: allowing login without IPFS validation");
+                
+                // Create a mock user for development
+                foundUser = {
+                    email: formData.email,
+                    password: formData.password,  // In dev mode, we'll just compare directly
+                    username: formData.email.split('@')[0],  // Use part of email as username
+                    address: accounts[0]
+                };
             }
 
             if (!foundUser) {
@@ -302,7 +417,11 @@ const Login = () => {
             }
 
             // Verify password
-            if (SHA256(formData.password).toString() === SHA256(foundUser.password).toString()) {
+            const passwordMatches = bypassIPFSForLocalhost 
+                ? formData.password === foundUser.password 
+                : SHA256(formData.password).toString() === SHA256(foundUser.password).toString();
+                
+            if (passwordMatches) {
                 // Store user session
                 localStorage.setItem('userData', JSON.stringify(foundUser));
                 localStorage.setItem('userSession', JSON.stringify({
@@ -317,8 +436,17 @@ const Login = () => {
                     localStorage.removeItem('rememberMe');
                 }
 
+                // Save wallet address to user data
+                await saveWalletAddressToUserData();
+
                 toast.success("Login successful!");
+                setMessage("Login successful! Redirecting...");
+                setMessageType("success");
+                
+                // Redirect after a short delay to show the success message
+                setTimeout(() => {
                 navigate("/home");
+                }, 1000);
             } else {
                 throw new Error("Invalid password");
             }
@@ -326,6 +454,7 @@ const Login = () => {
         } catch (error) {
             console.error("Error during login:", error);
             setMessage(error.message);
+            setMessageType("error");
             toast.error(error.message);
         } finally {
             setLoading(false);
@@ -396,9 +525,9 @@ const Login = () => {
                                         type="email"
                                         value={formData.email}
                                         onChange={handleInputChange}
-                                        error={formData.email && !validateEmail(formData.email)}
+                                        error={errors.email}
                                         helperText={
-                                            formData.email && !validateEmail(formData.email)
+                                            errors.email
                                                 ? "Please enter a valid email address"
                                                 : ""
                                         }
@@ -425,6 +554,12 @@ const Login = () => {
                                         type={showPassword ? "text" : "password"}
                                         value={formData.password}
                                         onChange={handleInputChange}
+                                        error={errors.password}
+                                        helperText={
+                                            errors.password
+                                                ? "Password is required"
+                                                : ""
+                                        }
                                         label="Password"
                                         variant="outlined"
                                         fullWidth
@@ -503,7 +638,7 @@ const Login = () => {
 
                             {message && (
                                 <Fade in={!!message} timeout={500}>
-                                    <MessageText variant="body2">
+                                    <MessageText variant="body2" success={messageType === "success"}>
                                         {message}
                                     </MessageText>
                                 </Fade>

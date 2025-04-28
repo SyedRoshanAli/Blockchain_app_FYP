@@ -19,7 +19,7 @@ const NotificationsPage = () => {
       if (userData.walletAddress) {
         setCurrentAddress(userData.walletAddress);
         
-        // Fetch notifications
+        // Fetch notifications from the updated notificationService
         const notifs = await notificationService.getNotifications(userData.walletAddress);
         setNotifications(notifs);
         

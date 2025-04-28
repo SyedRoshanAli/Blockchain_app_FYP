@@ -29,7 +29,8 @@ import {
     Link as LinkIcon,
     File,
     Repeat,
-    Send
+    Send,
+    BarChart
 } from 'lucide-react';
 import { useNavigate, Link } from "react-router-dom";
 import { toast } from "react-hot-toast";
@@ -140,12 +141,15 @@ const HomePage = () => {
         const messageInterval = setInterval(fetchUnreadCount, 30000); // Check every 30 seconds
         
         // Check for notifications initially and set up interval
-        const notificationCount = checkNotifications();
-        setNotificationCount(notificationCount);
+        const checkNotificationsAndUpdate = async () => {
+            const count = await checkNotifications();
+            setNotificationCount(count);
+        };
+        
+        checkNotificationsAndUpdate();
         
         const notificationInterval = setInterval(() => {
-            const count = checkNotifications();
-            setNotificationCount(count);
+            checkNotificationsAndUpdate();
         }, 30000); // Check every 30 seconds
         
         return () => {
@@ -696,11 +700,26 @@ const HomePage = () => {
                 const displayName = username || currentAddress.substring(0, 6) + '...' + currentAddress.substring(38);
                 
                 // Create notification
+                let contentPreview = "your post";
+                
+                // Check if content exists and is a string
+                if (postData.content) {
+                    if (typeof postData.content === 'string') {
+                        contentPreview = postData.content.substring(0, 50) + (postData.content.length > 50 ? '...' : '');
+                    } else if (postData.content.text) {
+                        // Content is an object with a text property
+                        contentPreview = postData.content.text.substring(0, 50) + (postData.content.text.length > 50 ? '...' : '');
+                    } else if (postData.content.media && postData.content.media.length > 0) {
+                        // Content has media
+                        contentPreview = `[Shared media]`;
+                    }
+                }
+                
                 await notificationService.createLikeNotification(
                     postData.creator, 
                     displayName, 
                     postId,
-                    postData.content.substring(0, 50) + (postData.content.length > 50 ? '...' : '')
+                    contentPreview
                 );
             }
         } catch (error) {
@@ -1419,23 +1438,18 @@ const HomePage = () => {
     };
 
     // Add this function to check for notifications
-    const checkNotifications = () => {
+    const checkNotifications = async () => {
         try {
-            // Get current user's username
-            const userSession = JSON.parse(localStorage.getItem('userSession') || '{}');
+            // Get current user's data
             const userData = JSON.parse(localStorage.getItem('userData') || '{}');
-            const currentUsername = userSession.username || userData.username;
             
-            if (!currentUsername) return 0;
+            if (userData.walletAddress) {
+                // Use the notificationService to get unread count
+                const unreadCount = await notificationService.getUnreadCount(userData.walletAddress);
+                return unreadCount;
+            }
             
-            // Get notifications for this user
-            const notifications = JSON.parse(localStorage.getItem('notifications') || '{}');
-            const userNotifications = notifications[currentUsername] || [];
-            
-            // Count unread notifications
-            const unreadCount = userNotifications.filter(n => !n.read).length;
-            
-            return unreadCount;
+            return 0;
         } catch (error) {
             console.error("Error checking notifications:", error);
             return 0;
@@ -1468,17 +1482,25 @@ const HomePage = () => {
                     localStorage.setItem('localPosts', JSON.stringify(localPosts));
                 } catch (error) {
                     console.error("Error fetching content from IPFS:", error);
+                    // Create a fallback content object to prevent errors
+                    content = { 
+                        text: "Post content unavailable",
+                        timestamp: parseInt(postDetails.timestamp) * 1000,
+                        media: []
+                    };
                 }
             }
             
+            // Format the post data
             return {
                 id: postDetails.postId,
                 creator: postDetails.creator,
-                contentHash: contentHash,
+                contentHash: postDetails.contentHash,
                 timestamp: parseInt(postDetails.timestamp) * 1000,
                 hasMedia: postDetails.hasMedia,
-                tags: postDetails.tags,
-                content: content
+                tags: postDetails.tags || [],
+                content: content, // This could be null if both localStorage and IPFS failed
+                likes: await CreatePostContract.methods.getPostLikes(postId).call()
             };
         } catch (error) {
             console.error("Error fetching post data:", error);
@@ -1507,7 +1529,15 @@ const HomePage = () => {
                             </a>
                         </li>
                             <li>
-                            <NotificationBadge />
+                                <a href="/notifications" className="sidebar-nav-link">
+                                    <div className="nav-icon-container">
+                                <Bell size={20} />
+                                        {notificationCount > 0 && (
+                                            <div className="notification-badge">{notificationCount > 9 ? '9+' : notificationCount}</div>
+                                        )}
+                                    </div>
+                                <span>Notifications</span>
+                            </a>
                         </li>
                             <li>
                                 <a href="/messages" className="sidebar-nav-link">
@@ -1538,29 +1568,35 @@ const HomePage = () => {
                                 <span>Settings</span>
                             </a>
                         </li>
-                    </ul>
+                            <li>
+                                <a href="/analytics">
+                                    <BarChart size={20} />
+                                    <span>Analytics</span>
+                            </a>
+                        </li>
+                        </ul>
                 </nav>
                     
                     <button className="create-post-btn" onClick={handleCreatePost}>
                         <Plus size={18} />
                         <span>Create Post</span>
-                    </button>
+                            </button>
                     
                     <div className="sidebar-footer">
                         <button className="dark-mode-toggle" onClick={toggleDarkMode}>
                             {darkMode ? <Sun size={18} /> : <Moon size={18} />}
                             <span>{darkMode ? 'Light Mode' : 'Dark Mode'}</span>
-                        </button>
+                                    </button>
                         
                         <button className="logout-button" onClick={handleLogout}>
                             <LogOut size={18} />
                             <span>Log Out</span>
-                        </button>
+                                    </button>
                         
                         <div className="user-profile" onClick={handleProfileClick}>
                             <div className="avatar">
                                 {userData?.username?.[0]?.toUpperCase() || "U"}
-                            </div>
+                                </div>
                             <div className="user-info">
                                 <h4>{userData?.username || "User"}</h4>
                                 <p>@{userData?.username?.toLowerCase().replace(/\s+/g, '_') || "username"}</p>
@@ -1568,9 +1604,9 @@ const HomePage = () => {
                             <MoreHorizontal size={16} />
                         </div>
                     </div>
-                </aside>
+            </aside>
 
-                {/* Main Content */}
+            {/* Main Content */}
                 <main className={`main-content ${animateContent ? 'animate-in' : ''}`}>
                     <header className="content-header">
                         <h2>Home</h2>
@@ -1761,8 +1797,8 @@ const HomePage = () => {
                 <a href="/notifications" className="mobile-nav-item">
                     <div className="nav-icon-container">
                         <Bell size={22} />
-                        {followRequestCount > 0 && (
-                            <span className="notification-badge">{followRequestCount}</span>
+                        {notificationCount > 0 && (
+                            <div className="notification-badge">{notificationCount > 9 ? '9+' : notificationCount}</div>
                         )}
                     </div>
                     <span>Notifications</span>

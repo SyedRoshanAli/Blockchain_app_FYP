@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="description" content="BlockConnect - Connect through blockchain" />
+    <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
+    <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
+    <title>BlockConnect</title>
+    
+    <!-- Text-based logo loading screen styles with added image logo -->
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif;
+      }
+      
+      #loader {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: #7d7ae9;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 9999;
+        transition: opacity 0.5s ease-out;
+      }
+      
+      .logo-image {
+        width: 650px;
+        height: 650px;
+        margin-bottom: 20px;
+        border-radius: 20px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+        padding: 15px;
+        object-fit: contain;
+        animation: pulseShadow 2s infinite ease-in-out, scalePulse 3s infinite ease-in-out;
+      }
+      
+      @keyframes scalePulse {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.05); }
+        100% { transform: scale(1); }
+      }
+      
+      @keyframes pulseShadow {
+        0% { box-shadow: 0 8px 24px rgba(0,0,0,0.2); }
+        50% { box-shadow: 0 12px 30px rgba(0,0,0,0.4); }
+        100% { box-shadow: 0 8px 24px rgba(0,0,0,0.2); }
+      }
+      
+      .brand-logo {
+        font-size: 50px;
+        font-weight: 800;
+        color: white;
+        margin-top: 20px;
+        margin-bottom: 20px;
+        position: relative;
+        text-shadow: 0 4px 8px rgba(0,0,0,0.1);
+      }
+      
+      .brand-logo .letter-b {
+        font-size: 80px;
+        color: rgba(255,255,255,0.9);
+        position: relative;
+        margin-right: 10px;
+      }
+      
+      .subtitle {
+        font-size: 20px;
+        color: rgba(255,255,255,0.8);
+        margin-bottom: 40px;
+        text-align: center;
+      }
+      
+      .spinner {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        border: 4px solid rgba(255, 255, 255, 0.2);
+        border-top-color: white;
+        animation: spin 1s linear infinite;
+      }
+      
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+      
+      @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      
+      .logo-image {
+        animation: fadeIn 0.6s ease-out forwards;
+      }
+      
+      .brand-logo {
+        animation: fadeIn 0.6s 0.2s ease-out both;
+      }
+      
+      .subtitle {
+        animation: fadeIn 0.6s 0.4s ease-out both;
+      }
+      
+      .spinner {
+        animation: fadeIn 0.6s 0.6s ease-out both, spin 1s 0.6s linear infinite;
+        opacity: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    
+    <!-- Updated loader with image logo -->
+    <div id="loader">
+      <img src="%PUBLIC_URL%/logo.png" alt="BlockConnect Logo" class="logo-image">
+      <div class="brand-logo">
+        <span class="letter-b">B</span>LOCKCONNECT
+      </div>
+      <div class="subtitle">Connect through blockchain</div>
+      <div class="spinner"></div>
+    </div>
+    
+    <div id="root"></div>
+    
+    <script>
+      // Hide loader when app is loaded
+      window.addEventListener('load', function() {
+        // Give React a moment to render
+        setTimeout(function() {
+          const loader = document.getElementById('loader');
+          if (loader) {
+            loader.style.opacity = 0;
+            setTimeout(function() {
+              loader.style.display = 'none';
+            }, 500);
+          }
+        }, 1000); // Increased timeout to ensure React has rendered
+      });
+    </script>
+  </body>
+</html> 

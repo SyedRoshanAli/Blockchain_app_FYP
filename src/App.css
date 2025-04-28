@@ -1,0 +1,69 @@
+/* Add this to your App.css or appropriate stylesheet */
+.app-logo {
+  height: 40px;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .app-logo {
+    animation: none; /* Remove spinning animation if it's there */
+  }
+}
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  padding: 12px 24px;
+  background-color: white;
+  border-bottom: 1px solid #eaeaea;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.logo-container {
+  display: flex;
+  align-items: center;
+}
+
+/* Made logo larger */
+.app-logo {
+  height: 50px; /* Increased from 36px */
+  width: auto;
+  margin-right: 12px;
+  transition: transform 0.3s ease;
+}
+
+/* Add a subtle hover effect */
+.app-logo:hover {
+  transform: scale(1.05);
+}
+
+.app-header h1 {
+  font-size: 22px; /* Increased from 20px */
+  font-weight: 700;
+  color: #333;
+  margin: 0;
+  letter-spacing: 0.5px;
+}
+
+/* Remove any animation */
+.app-logo {
+  animation: none !important;
+}
+
+/* Add dark mode support */
+@media (prefers-color-scheme: dark) {
+  .app-header {
+    background-color: #1f2937;
+    border-bottom-color: #374151;
+  }
+  
+  .app-header h1 {
+    color: #f9fafb;
+  }
+} 

@@ -1,5 +1,5 @@
 // Cache name - update version when content changes
-const CACHE_NAME = 'blockchain-social-v1';
+const CACHE_NAME = 'blockchain-social-v3';
 
 // Assets to cache
 const urlsToCache = [
@@ -56,20 +56,14 @@ self.addEventListener('fetch', event => {
     return;
   }
   
-  // For HTML navigation requests, always try network first
-  if (event.request.headers.get('accept').includes('text/html')) {
+  // For navigation requests (URLs without file extensions), serve index.html
+  if (event.request.mode === 'navigate' || 
+      (event.request.headers.get('accept') && 
+       event.request.headers.get('accept').includes('text/html'))) {
     event.respondWith(
       fetch(event.request)
-        .then(response => {
-          // Cache the latest version
-          let responseClone = response.clone();
-          caches.open(CACHE_NAME).then(cache => {
-            cache.put(event.request, responseClone);
-          });
-          return response;
-        })
         .catch(() => {
-          return caches.match(event.request);
+          return caches.match('/index.html');
         })
     );
     return;
@@ -79,17 +73,23 @@ self.addEventListener('fetch', event => {
   event.respondWith(
     caches.match(event.request)
       .then(cachedResponse => {
-        // Use cached version if available, and fetch an update for next time
+        // Use cached version if available
         const fetchPromise = fetch(event.request)
           .then(networkResponse => {
-            // Update cache
-            caches.open(CACHE_NAME).then(cache => {
-              cache.put(event.request, networkResponse.clone());
-            });
+            // Clone the response before updating cache
+            const responseToCache = networkResponse.clone();
+            caches.open(CACHE_NAME)
+              .then(cache => {
+                cache.put(event.request, responseToCache);
+              })
+              .catch(err => {
+                console.error('Cache update error:', err);
+              });
             return networkResponse;
           })
           .catch(error => {
             console.log('Fetch failed:', error);
+            return null;
           });
           
         return cachedResponse || fetchPromise;

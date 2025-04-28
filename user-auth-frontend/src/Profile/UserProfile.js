@@ -23,6 +23,7 @@ import { toast } from "react-hot-toast";
 import "./UserProfile.css";
 import MessageModal from './MessageModal';
 import { messageService } from '../services/messageService';
+import { getFromIPFS, IPFS_GATEWAY } from '../ipfs';
 
 const UserProfile = () => {
     const { username } = useParams();
@@ -158,7 +159,7 @@ const UserProfile = () => {
             const latestHash = ipfsHashes[ipfsHashes.length - 1];
 
             // Fetch user data from IPFS
-            const response = await fetch(`http://127.0.0.1:8083/ipfs/${latestHash}`);
+            const response = await fetch(`${IPFS_GATEWAY}/${latestHash}`);
             if (!response.ok) {
                 throw new Error("Failed to fetch user data from IPFS");
             }
@@ -192,7 +193,7 @@ const UserProfile = () => {
                 // Try to get the registration timestamp from the user's first hash
                 if (ipfsHashes.length > 0) {
                     const firstHash = ipfsHashes[0];
-                    const firstDataResponse = await fetch(`http://127.0.0.1:8083/ipfs/${firstHash}`);
+                    const firstDataResponse = await fetch(`${IPFS_GATEWAY}/${firstHash}`);
                     
                     if (firstDataResponse.ok) {
                         const firstData = await firstDataResponse.json();
@@ -255,7 +256,7 @@ const UserProfile = () => {
                         .call();
 
                     // Fetch post content from IPFS
-                    const response = await fetch(`http://127.0.0.1:8083/ipfs/${post.contentHash}`);
+                    const response = await fetch(`${IPFS_GATEWAY}/${post.contentHash}`);
                     if (!response.ok) {
                         throw new Error(`Failed to fetch post ${postId} content from IPFS`);
                     }

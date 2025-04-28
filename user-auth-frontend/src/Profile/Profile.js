@@ -31,7 +31,8 @@ import {
     EyeOff,
     MoreHorizontal,
     File,
-    Send
+    Send,
+    BarChart
 } from "lucide-react";
 import "./Profile.css";
 import { toast } from "react-hot-toast";
@@ -110,6 +111,7 @@ function ProfilePage() {
     const [comments, setComments] = useState([]);
     const [isLoadingComments, setIsLoadingComments] = useState(false);
     const [currentAddress, setCurrentAddress] = useState('');
+    const [notificationCount, setNotificationCount] = useState(0);
 
     useEffect(() => {
         if (username && username !== userData?.username) {
@@ -142,8 +144,30 @@ function ProfilePage() {
         // Check for new messages every 30 seconds
         const interval = setInterval(fetchUnreadCount, 30000);
 
+        // Check for notifications initially and set up interval
+        const checkNotificationsAndUpdate = async () => {
+            try {
+                const userData = JSON.parse(localStorage.getItem('userData') || '{}');
+                if (userData.walletAddress) {
+                    // Use the updated notificationService to fetch notifications
+                    const notifications = await notificationService.getNotifications(userData.walletAddress);
+                    const count = notifications.filter(n => !n.read).length;
+                    setNotificationCount(count);
+                }
+            } catch (error) {
+                console.error("Error checking notifications:", error);
+            }
+        };
+
+        checkNotificationsAndUpdate();
+
+        const notificationInterval = setInterval(() => {
+            checkNotificationsAndUpdate();
+        }, 30000); // Check every 30 seconds
+
         return () => {
             clearInterval(interval);
+            clearInterval(notificationInterval);
         };
     }, []);
 
@@ -174,6 +198,24 @@ function ProfilePage() {
         return () => {
             console.log = originalConsoleLog;
         };
+    }, []);
+
+    useEffect(() => {
+        const storedUserData = localStorage.getItem('userData');
+        if (storedUserData) {
+            const parsedUserData = JSON.parse(storedUserData);
+            setUserData(parsedUserData);
+            
+            // Load profile and cover images from localStorage
+            if (parsedUserData.profileImage) {
+                setImagePreview(parsedUserData.profileImage);
+                setShowPlus(false);
+            }
+            
+            if (parsedUserData.coverImage) {
+                setCoverImagePreview(parsedUserData.coverImage);
+            }
+        }
     }, []);
 
     const fetchUserData = async () => {
@@ -365,18 +407,10 @@ function ProfilePage() {
 
     const fetchUnreadCount = async () => {
         try {
-            const accounts = await window.ethereum.request({
-                method: "eth_requestAccounts"
-            });
-            
-            // Get unread count from contract
-            const count = await UserAuthContract.methods
-                .getUnreadMessageCount()
-                .call({ from: accounts[0] });
-                
+            const count = await messageService.getUnreadCount();
             setUnreadMessages(Number(count));
         } catch (error) {
-            console.error('Error fetching unread count:', error);
+            console.error("Error fetching unread message count:", error);
         }
     };
 
@@ -393,11 +427,21 @@ function ProfilePage() {
                 // Show preview immediately
                 const reader = new FileReader();
                 reader.onloadend = () => {
-                    setImagePreview(reader.result);
+                    const imageData = reader.result;
+                    setImagePreview(imageData);
                     setShowPlus(false);
+                    
+                    // Save to localStorage
+                    const updatedUserData = {
+                        ...userData,
+                        profileImage: imageData
+                };
+                    localStorage.setItem('userData', JSON.stringify(updatedUserData));
+                    setUserData(updatedUserData);
+                    
+                toast.success('Profile picture updated!');
                 };
                 reader.readAsDataURL(file);
-                toast.success('Profile picture updated!');
             }
         } catch (error) {
             console.error('Error updating profile picture:', error);
@@ -412,10 +456,20 @@ function ProfilePage() {
                 // Show preview immediately
                 const reader = new FileReader();
                 reader.onloadend = () => {
-                    setCoverImagePreview(reader.result);
+                    const coverData = reader.result;
+                    setCoverImagePreview(coverData);
+                    
+                    // Save to localStorage
+                    const updatedUserData = {
+                        ...userData,
+                        coverImage: coverData
+                    };
+                    localStorage.setItem('userData', JSON.stringify(updatedUserData));
+                    setUserData(updatedUserData);
+                    
+                toast.success('Cover photo updated!');
                 };
                 reader.readAsDataURL(file);
-                toast.success('Cover photo updated!');
             }
         } catch (error) {
             console.error('Error updating cover photo:', error);
@@ -1485,11 +1539,24 @@ function ProfilePage() {
                             </a>
                         </li>
                         <li>
-                            <NotificationBadge />
+                            <a href="/notifications" onClick={handleNotification} className="sidebar-nav-link">
+                                <div className="nav-icon-container">
+                                    <Bell size={20} />
+                                    {notificationCount > 0 && (
+                                        <div className="notification-badge">{notificationCount > 9 ? '9+' : notificationCount}</div>
+                                    )}
+                                </div>
+                                <span>Notifications</span>
+                            </a>
                         </li>
                         <li>
-                            <a href="/messages">
-                                <MessageSquare size={20} />
+                            <a href="/messages" className="sidebar-nav-link">
+                                <div className="nav-icon-container">
+                                    <MessageSquare size={20} />
+                                    {unreadMessages > 0 && (
+                                        <div className="notification-badge">{unreadMessages > 9 ? '9+' : unreadMessages}</div>
+                                    )}
+                                </div>
                                 <span>Messages</span>
                             </a>
                         </li>
@@ -1526,6 +1593,12 @@ function ProfilePage() {
                                         {hiddenTweets.length}
                                     </span>
                                 )}
+                            </a>
+                        </li>
+                        <li>
+                            <a href="/analytics">
+                                <BarChart size={20} />
+                                <span>Analytics</span>
                             </a>
                         </li>
                         <li className="sidebar-divider"></li>

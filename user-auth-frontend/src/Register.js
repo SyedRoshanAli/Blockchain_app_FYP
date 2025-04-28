@@ -149,8 +149,8 @@ const LogoTypography = styled(Box)({
     alignItems: "center",
     fontSize: "1.5rem",
     "& img": {
-        width: "40px",
-        height: "40px",
+        width: "50px",
+        height: "50px",
         marginRight: "10px",
         borderRadius: "50%",
         boxShadow: "0 2px 8px rgba(0, 0, 0, 0.2)",

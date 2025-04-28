@@ -37,6 +37,9 @@
 
     <title>Blockchain Social Network</title>
     
+    <!-- Process environment polyfill for web3 compatibility -->
+    <script src="%PUBLIC_URL%/process-env.js"></script>
+    
     <!-- Add base CSS for PWA enhancements -->
     <style>
       /* Improves iOS PWA experience */
@@ -46,7 +49,7 @@
       }
       
       body {
-        height: 100%;
+        min-height: 100%;
         overflow-x: hidden;
         -webkit-tap-highlight-color: transparent;
         -webkit-touch-callout: none;
@@ -61,12 +64,13 @@
         }
       }
       
-      /* Disable pull-to-refresh on iOS */
-      body {
-        position: fixed;
-        width: 100%;
-        overflow-y: scroll;
-        -webkit-overflow-scrolling: touch;
+      /* Better scroll handling without breaking scroll */
+      @supports (-webkit-touch-callout: none) {
+        /* iOS specific tweaks */
+        body {
+          /* Use momentum scrolling */
+          -webkit-overflow-scrolling: touch;
+        }
       }
       
       /* Loading animation for app initialization */
@@ -80,14 +84,19 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        background-color: #6366f1;
+        background-color: #7d7ae9;
         z-index: 9999;
       }
       
       .app-loading-logo {
-        width: 120px;
-        height: 120px;
+        width: 450px;
+        height: 450px;
         margin-bottom: 20px;
+        border-radius: 16px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+        padding: 10px;
+        object-fit: contain;
+        animation: logoPulse 3s infinite ease-in-out;
       }
       
       .app-loading-spinner {
@@ -101,6 +110,12 @@
       
       @keyframes spin {
         to { transform: rotate(360deg); }
+      }
+      
+      @keyframes logoPulse {
+        0% { transform: scale(1); box-shadow: 0 8px 24px rgba(0,0,0,0.2); }
+        50% { transform: scale(1.05); box-shadow: 0 12px 30px rgba(0,0,0,0.4); }
+        100% { transform: scale(1); box-shadow: 0 8px 24px rgba(0,0,0,0.2); }
       }
     </style>
   </head>
@@ -153,19 +168,6 @@
             e.preventDefault();
             window.location.href = target.href;
           }
-        });
-      }
-      
-      // Register service worker if not already registered
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', function() {
-          navigator.serviceWorker.register('/sw.js')
-            .then(function(registration) {
-              console.log('ServiceWorker registration successful with scope: ', registration.scope);
-            })
-            .catch(function(error) {
-              console.log('ServiceWorker registration failed: ', error);
-            });
         });
       }
     </script>

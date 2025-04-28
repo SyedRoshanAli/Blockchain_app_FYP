@@ -3,10 +3,10 @@ import UserAuthABI from "./artifacts/UserAuth.json"; // Path to UserAuth ABI
 import CreatePostABI from "./artifacts/CreatePost.json"; // Path to CreatePost ABI
 import FollowRelationshipABI from "./artifacts/FollowRelationship.json";
 
-// Updated contract addresses
-const userAuthAddress = "0x158d4b326966332821D139b56d563c9D7061917a"; // New UserAuth address
-const createPostAddress = "0xF570A3256081Aab52225CBeDE01c4d892CcDA61d"; // New CreatePost address
-const followRelationshipAddress = "0x31b87943aBb3C830D97B62Af84E66e7ee13e1B1B"; // New FollowRelationship address
+// Updated contract addresses from latest deployment
+const userAuthAddress = "0xf0D7ffC5F06e80Cd3C2886257ddf39eb6FcDC4DC"; // New UserAuth address
+const createPostAddress = "0x15f35ff55f75C94F4BdaF93215A96582d76C3875"; // New CreatePost address
+const followRelationshipAddress = "0xad48CdEe5574C8A449A22b632cf5c8B15F21eF60"; // New FollowRelationship address
 
 // Web3 setup
 const web3 = new Web3(Web3.givenProvider || "http://localhost:7545");

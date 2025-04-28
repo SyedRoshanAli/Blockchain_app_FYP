@@ -224,15 +224,16 @@ body {
   background: linear-gradient(45deg, var(--secondary-color), #fb7185);
   color: white;
   font-size: 10px;
-  width: 18px;
+  min-width: 18px;
   height: 18px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-weight: 600;
   box-shadow: 0 2px 6px rgba(244, 63, 94, 0.4);
   animation: pulse 2s infinite;
+  padding: 0 4px;
 }
 
 .create-post-btn {

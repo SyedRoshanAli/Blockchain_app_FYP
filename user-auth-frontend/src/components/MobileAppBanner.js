@@ -9,7 +9,15 @@ const MobileAppBanner = () => {
   const [isStandalone, setIsStandalone] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState(null);
 
+  // This state tracks if we've already processed the beforeinstallprompt event
+  const [hasProcessedEvent, setHasProcessedEvent] = useState(false);
+
   useEffect(() => {
+    // Check if already dismissed permanently
+    if (localStorage.getItem('appBannerDismissedPermanently') === 'true') {
+      return;
+    }
+
     // Check if the app is already installed
     setIsStandalone(window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone);
     
@@ -17,42 +25,84 @@ const MobileAppBanner = () => {
     const userAgent = navigator.userAgent || navigator.vendor || window.opera;
     setIsIOS(/iPad|iPhone|iPod/.test(userAgent) && !window.MSStream);
     setIsAndroid(/android/i.test(userAgent));
-    
-    // Only show banner on mobile devices that aren't already in standalone mode
-    const shouldShowBanner = (isIOS || isAndroid) && !isStandalone && !localStorage.getItem('appBannerDismissed');
-    setShowBanner(shouldShowBanner);
-    
+
     // Handle beforeinstallprompt event for Android
-    window.addEventListener('beforeinstallprompt', (e) => {
-      // Prevent Chrome 67+ from automatically showing the prompt
-      e.preventDefault();
-      // Stash the event so it can be triggered later
-      setDeferredPrompt(e);
-    });
+    const handleBeforeInstallPrompt = (e) => {
+      // Don't prevent default if we've already processed an event
+      if (!hasProcessedEvent) {
+        // We still need to call preventDefault to handle the banner ourselves
+        e.preventDefault();
+        console.log('Saved beforeinstallprompt event');
+        setDeferredPrompt(e);
+        setHasProcessedEvent(true);
+        
+        // Only show banner if not already dismissed temporarily
+        const lastDismissed = localStorage.getItem('appBannerDismissed');
+        const dismissedTime = lastDismissed ? parseInt(lastDismissed) : 0;
+        const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+        
+        if (!lastDismissed || dismissedTime < oneDayAgo) {
+          setShowBanner(true);
+        }
+      }
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    
+    // For iOS, show banner based on device detection since iOS doesn't support beforeinstallprompt
+    if (isIOS && !isStandalone) {
+      const lastDismissed = localStorage.getItem('appBannerDismissed');
+      const dismissedTime = lastDismissed ? parseInt(lastDismissed) : 0;
+      const oneDayAgo = Date.now() - (24 * 60 * 60 * 1000);
+      
+      if (!lastDismissed || dismissedTime < oneDayAgo) {
+        setShowBanner(true);
+      }
+    }
     
     return () => {
-      window.removeEventListener('beforeinstallprompt', () => {});
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     };
-  }, [isIOS, isAndroid, isStandalone]);
+  }, [isIOS, isAndroid, isStandalone, hasProcessedEvent]);
 
-  const dismissBanner = () => {
+  const dismissBanner = (permanent = false) => {
     setShowBanner(false);
-    localStorage.setItem('appBannerDismissed', 'true');
+    if (permanent) {
+      localStorage.setItem('appBannerDismissedPermanently', 'true');
+    } else {
+      // Store timestamp for temporary dismissal (24 hours)
+      localStorage.setItem('appBannerDismissed', Date.now().toString());
+    }
   };
 
   const installApp = async () => {
     if (deferredPrompt) {
-      // For Android - show the installation prompt
-      deferredPrompt.prompt();
-      // Wait for the user to respond to the prompt
-      const choiceResult = await deferredPrompt.userChoice;
-      if (choiceResult.outcome === 'accepted') {
-        console.log('User accepted the install prompt');
+      try {
+        // Show the installation prompt - this is what fixes the warning
+        deferredPrompt.prompt();
+        
+        // Wait for the user to respond to the prompt
+        const choiceResult = await deferredPrompt.userChoice;
+        
+        if (choiceResult.outcome === 'accepted') {
+          console.log('User accepted the install prompt');
+          // If user accepts, dismiss permanently
+          dismissBanner(true);
+        } else {
+          console.log('User dismissed the install prompt');
+          // If user dismisses prompt, just dismiss for 24 hours
+          dismissBanner(false);
+        }
+      } catch (error) {
+        console.error('Error showing install prompt:', error);
+        dismissBanner(false);
+      } finally {
+        // Clear the saved prompt since it can't be used again
+        setDeferredPrompt(null);
       }
-      // Clear the saved prompt since it can't be used again
-      setDeferredPrompt(null);
+    } else {
+      dismissBanner(false);
     }
-    dismissBanner();
   };
 
   if (!showBanner) return null;
@@ -75,7 +125,11 @@ const MobileAppBanner = () => {
             Install
           </button>
         )}
-        <button className="dismiss-button" onClick={dismissBanner}>
+        <button 
+          className="dismiss-button" 
+          onClick={() => dismissBanner(false)}
+          aria-label="Dismiss"
+        >
           <X size={18} />
         </button>
       </div>

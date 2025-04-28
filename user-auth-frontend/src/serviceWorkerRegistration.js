@@ -21,18 +21,33 @@ const isLocalhost = Boolean(
     window.location.hostname.match(/^127(?:\.(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}$/)
 );
 
-// The URL of our service worker
-const swUrl = `${process.env.PUBLIC_URL}/sw.js`;
-
 export function register() {
-  if ('serviceWorker' in navigator) {
+  // Check if the service worker is already registered to avoid duplicate registration
+  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    console.log('Service worker already registered and controlling the page');
+    return;
+  }
+
+  if (process.env.NODE_ENV === 'production' && 'serviceWorker' in navigator) {
+    // The URL constructor is available in all browsers that support SW.
+    const publicUrl = new URL(process.env.PUBLIC_URL, window.location.href);
+    
+    if (publicUrl.origin !== window.location.origin) {
+      // Our service worker won't work if PUBLIC_URL is on a different origin
+      // from what our page is served on. This might happen if a CDN is used to
+      // serve assets; see https://github.com/facebook/create-react-app/issues/2374
+      return;
+    }
+
     window.addEventListener('load', () => {
-      if (!isLocalhost) {
-        // Production registration
-        registerValidSW(swUrl);
-      } else {
-        // Development (localhost) registration
+      const swUrl = `${process.env.PUBLIC_URL}/sw.js`;
+
+      if (isLocalhost) {
+        // This is running on localhost. Check if a service worker still exists.
         checkValidServiceWorker(swUrl);
+      } else {
+        // Not localhost. Just register service worker
+        registerValidSW(swUrl);
       }
     });
   }
@@ -42,19 +57,19 @@ function registerValidSW(swUrl) {
   navigator.serviceWorker
     .register(swUrl)
     .then(registration => {
-      // Handle updates
+      console.log('Service worker registration successful with scope:', registration.scope);
+      
       registration.onupdatefound = () => {
         const installingWorker = registration.installing;
         if (installingWorker == null) {
           return;
         }
+        
         installingWorker.onstatechange = () => {
           if (installingWorker.state === 'installed') {
             if (navigator.serviceWorker.controller) {
-              // At this point, the updated content has been fetched
-              console.log(
-                'New content is available and will be used when all tabs for this page are closed.'
-              );
+              // At this point, the updated precached content has been fetched
+              console.log('New content is available and will be used when all tabs for this page are closed.');
             } else {
               // At this point, everything has been precached
               console.log('Content is cached for offline use.');
@@ -65,8 +80,6 @@ function registerValidSW(swUrl) {
       
       // Handle push notifications once service worker is registered
       setupPushNotifications(registration);
-      
-      return registration;
     })
     .catch(error => {
       console.error('Error during service worker registration:', error);
@@ -75,25 +88,25 @@ function registerValidSW(swUrl) {
 
 // Check if the service worker can be found
 function checkValidServiceWorker(swUrl) {
-  // Check if the service worker can be found
+  // Check if the service worker can be found. If it can't reload the page.
   fetch(swUrl, {
-    headers: { 'Service-Worker': 'script' }
+    headers: { 'Service-Worker': 'script' },
   })
     .then(response => {
-      // Ensure service worker exists
+      // Ensure service worker exists, and that we really are getting a JS file.
       const contentType = response.headers.get('content-type');
       if (
         response.status === 404 ||
         (contentType != null && contentType.indexOf('javascript') === -1)
       ) {
-        // No service worker found, reload the page
+        // No service worker found. Probably a different app. Reload the page.
         navigator.serviceWorker.ready.then(registration => {
           registration.unregister().then(() => {
             window.location.reload();
           });
         });
       } else {
-        // Service worker found, proceed as normal
+        // Service worker found. Proceed as normal.
         registerValidSW(swUrl);
       }
     })

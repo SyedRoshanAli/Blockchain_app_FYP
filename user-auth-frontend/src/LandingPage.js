@@ -100,8 +100,8 @@ const LogoContainer = styled(Box)({
   display: "flex",
   alignItems: "center",
   "& img": {
-    width: "42px",
-    height: "42px",
+    width: "50px",
+    height: "50px",
     marginRight: "10px",
     borderRadius: "50%",
     boxShadow: "0 2px 8px rgba(0, 0, 0, 0.2)",
@@ -172,7 +172,50 @@ const LandingPage = () => {
   
   useEffect(() => {
     setAnimateHero(true);
+    
+    // Clean up any scroll behavior issues
+    document.body.style.overflow = 'auto';
+    document.body.style.position = 'static';
+    document.body.style.height = 'auto';
+    
+    // Handle anchor links for smooth scrolling
+    const handleAnchorClick = (e) => {
+      const href = e.currentTarget.getAttribute('href');
+      if (href && href.startsWith('#')) {
+        e.preventDefault();
+        const targetId = href.substring(1);
+        const targetElement = document.getElementById(targetId);
+        if (targetElement) {
+          targetElement.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start',
+          });
+        }
+      }
+    };
+
+    // Find all in-page anchor links and add event listeners
+    const anchorLinks = document.querySelectorAll('a[href^="#"]');
+    anchorLinks.forEach(link => {
+      link.addEventListener('click', handleAnchorClick);
+    });
+
+    return () => {
+      // Clean up event listeners
+      anchorLinks.forEach(link => {
+        link.removeEventListener('click', handleAnchorClick);
+      });
+    };
   }, []);
+  
+  // Function to scroll to features section
+  const scrollToFeatures = (e) => {
+    e.preventDefault();
+    const featuresSection = document.getElementById('features');
+    if (featuresSection) {
+      featuresSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
   
   // For navbar color change on scroll
   const trigger = useScrollTrigger({
@@ -344,16 +387,15 @@ const LandingPage = () => {
               Get Started
                 </GradientButton>
               </Link>
-              <Link to="#features" style={{ textDecoration: "none" }}>
-                <OutlinedGradientButton
-                  size="large"
-                  sx={{
-                    fontSize: { xs: "1rem", md: "1.1rem" },
-                  }}
-                >
-                  Learn More
-                </OutlinedGradientButton>
-          </Link>
+              <OutlinedGradientButton
+                size="large"
+                sx={{
+                  fontSize: { xs: "1rem", md: "1.1rem" },
+                }}
+                onClick={scrollToFeatures}
+              >
+                Learn More
+              </OutlinedGradientButton>
             </Box>
           </Fade>
 
@@ -397,8 +439,10 @@ const LandingPage = () => {
               '0%, 20%, 50%, 80%, 100%': { transform: 'translateY(0)' },
               '40%': { transform: 'translateY(-20px)' },
               '60%': { transform: 'translateY(-10px)' }
-            }
+            },
+            cursor: 'pointer',
           }}
+          onClick={scrollToFeatures}
         >
           <Box 
             sx={{ 
@@ -569,7 +613,7 @@ const LandingPage = () => {
                 </Typography>
               </LogoContainer>
               <Typography variant="body2" sx={{ color: 'rgba(255, 255, 255, 0.6)', mb: 2, maxWidth: '300px' }}>
-                A decentralized social platform built on blockchain technology, ensuring your privacy and data ownership.
+                A decentralized social platform built on blockchain technology, ensuring your privacy and security.
               </Typography>
               <Box>
                 <SocialButton aria-label="github">

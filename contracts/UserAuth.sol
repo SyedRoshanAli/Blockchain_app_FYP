@@ -37,6 +37,24 @@ contract UserAuth {
     // New mapping for IPFS hashes
     mapping(address => string[]) private userIpfsHashes;
 
+    // Data ownership enhancement - selective data export tracking
+    mapping(address => mapping(string => bool)) public dataExportPermissions;
+    
+    // Data ownership enhancement - recovery keys
+    mapping(address => address) public recoveryAddresses;
+    mapping(address => bool) public hasSetRecoveryAddress;
+    
+    // Data ownership enhancement - data deletion log
+    struct DataDeletionRecord {
+        string username;
+        uint256 timestamp;
+        bool canRecover;
+    }
+    mapping(address => DataDeletionRecord[]) public userDeletionHistory;
+    
+    // Data ownership enhancement - selective content deletion tracking
+    mapping(address => mapping(string => string[])) public deletedContentHashes;
+
     // Events
     event UserRegistered(string username, string ipfsHash, address userAddress);
     event UserUpdated(string username, string newIpfsHash, address userAddress);
@@ -50,6 +68,148 @@ contract UserAuth {
         uint256 timestamp
     );
     event MessageRead(uint256 indexed messageId, address indexed by);
+
+    // Add recovery address for account recovery
+    function setRecoveryAddress(address _recoveryAddress) public {
+        require(_recoveryAddress != address(0), "Invalid recovery address");
+        require(_recoveryAddress != msg.sender, "Recovery address cannot be your own address");
+        
+        recoveryAddresses[msg.sender] = _recoveryAddress;
+        hasSetRecoveryAddress[msg.sender] = true;
+        
+        emit RecoveryAddressSet(msg.sender, _recoveryAddress);
+    }
+    
+    // Update recovery address
+    function updateRecoveryAddress(address _newRecoveryAddress) public {
+        require(hasSetRecoveryAddress[msg.sender], "No recovery address previously set");
+        require(_newRecoveryAddress != address(0), "Invalid recovery address");
+        require(_newRecoveryAddress != msg.sender, "Recovery address cannot be your own address");
+        
+        recoveryAddresses[msg.sender] = _newRecoveryAddress;
+        
+        emit RecoveryAddressUpdated(msg.sender, _newRecoveryAddress);
+    }
+    
+    // Remove recovery address
+    function removeRecoveryAddress() public {
+        require(hasSetRecoveryAddress[msg.sender], "No recovery address set");
+        
+        delete recoveryAddresses[msg.sender];
+        hasSetRecoveryAddress[msg.sender] = false;
+        
+        emit RecoveryAddressRemoved(msg.sender);
+    }
+    
+    // Enhanced account deletion with recovery option
+    function enhancedResetUser(string memory _username, bool _allowRecovery) public {
+        // Ensure the user is already registered
+        require(users[msg.sender][_username].isRegistered, "User not registered");
+        require(users[msg.sender][_username].userAddress == msg.sender, "Unauthorized access");
+
+        // Store deletion record before deleting
+        DataDeletionRecord memory record = DataDeletionRecord({
+            username: _username,
+            timestamp: block.timestamp,
+            canRecover: _allowRecovery
+        });
+        
+        userDeletionHistory[msg.sender].push(record);
+
+        if (!_allowRecovery) {
+            // Permanent deletion - same as original resetUser
+            // Remove username from global tracking
+            usernameExists[_username] = false;
+    
+            // Remove user data
+            delete users[msg.sender][_username];
+    
+            // Remove username from user's list
+            for(uint i = 0; i < usernames[msg.sender].length; i++) {
+                if(keccak256(bytes(usernames[msg.sender][i])) == keccak256(bytes(_username))) {
+                    // Replace with last element and pop
+                    usernames[msg.sender][i] = usernames[msg.sender][usernames[msg.sender].length - 1];
+                    usernames[msg.sender].pop();
+                    break;
+                }
+            }
+        }
+        
+        // Emit enhanced reset event
+        emit EnhancedUserReset(_username, msg.sender, _allowRecovery);
+    }
+    
+    // Recover deleted account (if recovery was allowed)
+    function recoverDeletedAccount(string memory _username) public {
+        bool canRecover = false;
+        
+        // Check deletion history to see if recovery is possible
+        for (uint i = 0; i < userDeletionHistory[msg.sender].length; i++) {
+            if (keccak256(bytes(userDeletionHistory[msg.sender][i].username)) == keccak256(bytes(_username)) &&
+                userDeletionHistory[msg.sender][i].canRecover) {
+                canRecover = true;
+                break;
+            }
+        }
+        
+        require(canRecover, "Account recovery not available for this user");
+        
+        // Event for account recovery request
+        emit AccountRecoveryRequested(msg.sender, _username);
+    }
+    
+    // Allow recovery by recovery address
+    function recoverAccountByTrustedParty(address _userToRecover, string memory _username) public {
+        require(recoveryAddresses[_userToRecover] == msg.sender, "Not authorized as recovery address");
+        
+        bool canRecover = false;
+        
+        // Check deletion history
+        for (uint i = 0; i < userDeletionHistory[_userToRecover].length; i++) {
+            if (keccak256(bytes(userDeletionHistory[_userToRecover][i].username)) == keccak256(bytes(_username)) &&
+                userDeletionHistory[_userToRecover][i].canRecover) {
+                canRecover = true;
+                break;
+            }
+        }
+        
+        require(canRecover, "Account recovery not available for this user");
+        
+        // Event for recovery by trusted party
+        emit AccountRecoveredByTrustedParty(_userToRecover, msg.sender, _username);
+    }
+    
+    // Set data export permission for specific data type
+    function setDataExportPermission(string memory _dataType, bool _allowed) public {
+        dataExportPermissions[msg.sender][_dataType] = _allowed;
+        emit DataExportPermissionUpdated(msg.sender, _dataType, _allowed);
+    }
+    
+    // Check if data export is allowed for a specific type
+    function isExportAllowed(address _user, string memory _dataType) public view returns (bool) {
+        return dataExportPermissions[_user][_dataType];
+    }
+    
+    // Track deletion of specific content (like a post)
+    function trackContentDeletion(string memory _contentType, string memory _contentHash) public {
+        deletedContentHashes[msg.sender][_contentType].push(_contentHash);
+        emit ContentDeleted(msg.sender, _contentType, _contentHash);
+    }
+    
+    // Get deleted content hashes by type
+    function getDeletedContentByType(string memory _contentType) public view returns (string[] memory) {
+        return deletedContentHashes[msg.sender][_contentType];
+    }
+    
+    // Event declarations for data ownership features
+    event RecoveryAddressSet(address indexed user, address indexed recoveryAddress);
+    event RecoveryAddressUpdated(address indexed user, address indexed newRecoveryAddress);
+    event RecoveryAddressRemoved(address indexed user);
+    event EnhancedUserReset(string username, address indexed userAddress, bool recoverable);
+    event AccountRecoveryRequested(address indexed user, string username);
+    event AccountRecoveredByTrustedParty(address indexed user, address indexed recoveryAddress, string username);
+    event DataExportPermissionUpdated(address indexed user, string dataType, bool allowed);
+    event ContentDeleted(address indexed user, string contentType, string contentHash);
 
     // Register a new user
     function register(string memory _username, string memory _ipfsHash) public {
@@ -129,32 +289,6 @@ contract UserAuth {
     // Check if a username exists
     function isUsernameAvailable(string memory _username) public view returns (bool) {
         return !usernameExists[_username];
-    }
-
-    // Reset user registration (FOR DEVELOPMENT/TESTING PURPOSE ONLY)
-    function resetUser(string memory _username) public {
-        // Ensure the user is already registered
-        require(users[msg.sender][_username].isRegistered, "User not registered");
-        require(users[msg.sender][_username].userAddress == msg.sender, "Unauthorized access");
-
-        // Remove username from global tracking
-        usernameExists[_username] = false;
-
-        // Remove user data
-        delete users[msg.sender][_username];
-
-        // Remove username from user's list
-        for(uint i = 0; i < usernames[msg.sender].length; i++) {
-            if(keccak256(bytes(usernames[msg.sender][i])) == keccak256(bytes(_username))) {
-                // Replace with last element and pop
-                usernames[msg.sender][i] = usernames[msg.sender][usernames[msg.sender].length - 1];
-                usernames[msg.sender].pop();
-                break;
-            }
-        }
-
-        // Emit reset event
-        emit UserReset(_username, msg.sender);
     }
 
     // New function to send a message

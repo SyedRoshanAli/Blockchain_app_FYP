@@ -79,8 +79,49 @@
   justify-content: center;
 }
 
+/* Styles for the standalone notification badge component */
+.nav-icon-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .notification-icon {
   color: var(--icon-color, #1da1f2);
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+.notification-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: linear-gradient(45deg, #ec4899, #f43f5e);
+  color: white;
+  font-size: 10px;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(244, 63, 94, 0.4);
+  animation: pulse 2s infinite;
+  padding: 0 4px;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(244, 63, 94, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0); }
+}
+
+.notification-text {
+  margin-left: 10px;
+  font-size: 15px;
 }
 
 .notification-icon.like {

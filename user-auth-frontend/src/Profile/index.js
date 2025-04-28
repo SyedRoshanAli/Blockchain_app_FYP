@@ -3,6 +3,7 @@ import React, { useState, useEffect } from "react";
 import "./Profile.css";
 import { useNavigate } from "react-router-dom"; // For redirection
 import { UserAuthContract, CreatePostContract } from "../UserAuth"; // Import CreatePostContract
+import { IPFS_GATEWAY } from '../ipfs';
 
 const ProfilePage = () => {
     const tabs = ["Tweets", "Tweets & Replies", "Media", "Likes", "Lists"];
@@ -41,7 +42,7 @@ const ProfilePage = () => {
                 }
 
                 // Fetch user data from IPFS
-                const response = await fetch(`http://127.0.0.1:8083/ipfs/${userIpfsHash}`);
+                const response = await fetch(`${IPFS_GATEWAY}/${userIpfsHash}`);
                 if (!response.ok) {
                     throw new Error("Failed to fetch user data from IPFS.");
                 }
@@ -57,14 +58,14 @@ const ProfilePage = () => {
                 const fetchedPosts = await Promise.all(
                     postIds.map(async (postId) => {
                         const post = await CreatePostContract.methods.getPost(postId.toString()).call();
-                        const postDataResponse = await fetch(`http://127.0.0.1:8083/ipfs/${post.contentHash}`);
+                        const postDataResponse = await fetch(`${IPFS_GATEWAY}/${post.contentHash}`);
                         const postData = await postDataResponse.json(); // Parse the JSON content from IPFS
 
                         return {
                             id: post.postId.toString(),
                             title: postData.title,
                             description: postData.description,
-                            image: `http://127.0.0.1:8083/ipfs/${postData.image}`,
+                            image: `${IPFS_GATEWAY}/${postData.image}`,
                             timestamp: new Date(Number(post.timestamp) * 1000).toLocaleString(),
                         };
                     })
