@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Send, Smile, Image, Paperclip } from 'lucide-react';
-import { messageService } from '../services/messageService';
+import messageService from '../services/messageService';
 import { UserAuthContract } from "../UserAuth";
 import { toast } from 'react-hot-toast';
 import { format } from 'date-fns';

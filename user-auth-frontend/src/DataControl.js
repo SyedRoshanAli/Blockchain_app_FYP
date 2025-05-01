@@ -19,6 +19,7 @@ import { styled } from '@mui/system';
 import { UserAuthContract } from "./UserAuth";
 import { toast } from 'react-hot-toast';
 import { Shield, Download, Trash2, Eye, Lock } from 'lucide-react';
+import { uploadToIPFS, IPFS_GATEWAY } from './ipfs';
 
 const ControlPanel = styled(Paper)({
     padding: '2rem',
@@ -90,8 +91,73 @@ const DataControl = () => {
             // Save to localStorage
             localStorage.setItem('userData', JSON.stringify(updatedUserData));
             setUserData(updatedUserData);
-
-            toast.success("Privacy settings updated successfully");
+            
+            // Get the current user session
+            const userSession = JSON.parse(localStorage.getItem('userSession') || '{}');
+            if (!userSession.username) {
+                throw new Error("No active session found");
+            }
+            
+            // Get current user's address
+            const accounts = await window.ethereum.request({
+                method: "eth_requestAccounts"
+            });
+            
+            // Check if the user is registered on the blockchain
+            try {
+                // First, verify if the username exists
+                const isAvailable = await UserAuthContract.methods
+                    .isUsernameAvailable(userSession.username)
+                    .call();
+                
+                // If username is available, it means it's not registered
+                if (isAvailable) {
+                    // Just update localStorage and don't try to update on blockchain
+                    toast.success(`Privacy setting "${setting}" updated to ${updatedSettings[setting] ? 'ON' : 'OFF'} (stored locally)`);
+                    return;
+                }
+                
+                // Get the current profile hash from the blockchain
+                const profileHash = await UserAuthContract.methods
+                    .login(userSession.username)
+                    .call({ from: accounts[0] });
+                    
+                if (!profileHash) {
+                    throw new Error("No profile hash found");
+                }
+                
+                // Fetch profile from IPFS or localStorage
+                let profileData;
+                try {
+                    // Try to get from IPFS
+                    const response = await fetch(`${IPFS_GATEWAY}/${profileHash}`);
+                    if (response.ok) {
+                        profileData = await response.json();
+                    } else {
+                        throw new Error("Failed to fetch from IPFS");
+                    }
+                } catch (error) {
+                    console.warn("Falling back to localStorage for profile data");
+                    profileData = { ...userData };
+                }
+                
+                // Update the profile data with new privacy settings
+                profileData.privacySettings = updatedSettings;
+                
+                // Upload updated profile to IPFS
+                const newProfileHash = await uploadToIPFS(JSON.stringify(profileData));
+                
+                // Update the profile hash on blockchain
+                await UserAuthContract.methods
+                    .updateUser(userSession.username, newProfileHash)
+                    .send({ from: accounts[0] });
+                
+                toast.success(`Privacy setting "${setting}" updated to ${updatedSettings[setting] ? 'ON' : 'OFF'} (saved to blockchain)`);
+            } catch (error) {
+                console.error("Error updating on blockchain:", error);
+                // If blockchain update fails, at least the localStorage update succeeded
+                toast.success(`Privacy setting "${setting}" updated to ${updatedSettings[setting] ? 'ON' : 'OFF'} (stored locally only)`);
+            }
         } catch (error) {
             console.error("Error updating privacy settings:", error);
             toast.error("Failed to update privacy settings");

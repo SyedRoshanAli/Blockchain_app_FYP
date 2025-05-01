@@ -23,26 +23,45 @@ class NotificationService {
       const username = userSession.username;
       if (!username) throw new Error('No username found in session');
 
-      // Get the current profile hash from the blockchain
-      const profileHash = await UserAuthContract.methods.login(username).call({ from: userAddress });
-      if (!profileHash) throw new Error('No profile hash found for user');
+      // First check if the user is registered on the blockchain
+      try {
+        // Check if username is available (if available, it means not registered)
+        const isAvailable = await UserAuthContract.methods
+          .isUsernameAvailable(username)
+          .call();
+          
+        if (isAvailable) {
+          // User is not registered on blockchain, use localStorage only
+          const storedNotifications = localStorage.getItem(`${this.notificationsKey}_${userAddress}`);
+          if (storedNotifications) {
+            return JSON.parse(storedNotifications);
+          }
+          return [];
+        }
+        
+        // User is registered, proceed with blockchain/IPFS approach
+        const profileHash = await UserAuthContract.methods.login(username).call({ from: userAddress });
+        if (!profileHash) throw new Error('No profile hash found for user');
 
-      // Fetch the profile from IPFS
-      const profileBuffer = await getFromIPFS(profileHash);
-      const profile = JSON.parse(profileBuffer.toString());
+        // Fetch the profile from IPFS
+        const profileBuffer = await getFromIPFS(profileHash);
+        const profile = JSON.parse(profileBuffer.toString());
 
-      // Get the notification hash from the profile
-      const notificationHash = profile.notificationHash;
-      if (notificationHash) {
-        const notificationsBuffer = await getFromIPFS(notificationHash);
-        const notifications = JSON.parse(notificationsBuffer.toString());
-        // Store in localStorage for faster access
-        localStorage.setItem(`${this.notificationsKey}_${userAddress}`, JSON.stringify(notifications));
-        localStorage.setItem(`${this.notificationsKey}_hash_${userAddress}`, notificationHash);
-        return notifications;
+        // Get the notification hash from the profile
+        const notificationHash = profile.notificationHash;
+        if (notificationHash) {
+          const notificationsBuffer = await getFromIPFS(notificationHash);
+          const notifications = JSON.parse(notificationsBuffer.toString());
+          // Store in localStorage for faster access
+          localStorage.setItem(`${this.notificationsKey}_${userAddress}`, JSON.stringify(notifications));
+          localStorage.setItem(`${this.notificationsKey}_hash_${userAddress}`, notificationHash);
+          return notifications;
+        }
+      } catch (error) {
+        console.warn("Error accessing blockchain, falling back to localStorage:", error.message);
       }
 
-      // Fallback: Try to get from localStorage if no notificationHash
+      // Fallback: Try to get from localStorage if blockchain/IPFS approach fails
       const storedNotifications = localStorage.getItem(`${this.notificationsKey}_${userAddress}`);
       if (storedNotifications) {
         return JSON.parse(storedNotifications);
@@ -55,69 +74,107 @@ class NotificationService {
   }
 
   // Helper to update the user's profile with the latest notification hash
-  async updateProfileNotificationHash(userAddress, newNotificationHash) {
-    // Get the user's current profile hash from the blockchain (using their username)
-    const userSession = JSON.parse(localStorage.getItem('userSession') || '{}');
-    const username = userSession.username;
-    if (!username) throw new Error('No username found in session');
-
-    // Get the current profile hash from the blockchain
-    const profileHash = await UserAuthContract.methods.login(username).call({ from: userAddress });
-    if (!profileHash) throw new Error('No profile hash found for user');
-
-    // Fetch the profile from IPFS
-    const profileBuffer = await getFromIPFS(profileHash);
-    const profile = JSON.parse(profileBuffer.toString());
-
-    // Update the notificationHash field
-    profile.notificationHash = newNotificationHash;
-
-    // Upload the updated profile to IPFS
-    const newProfileHash = await uploadToIPFS(JSON.stringify(profile));
-
-    // Update the profile hash on-chain
-    await UserAuthContract.methods.updateUser(username, newProfileHash).send({ from: userAddress });
-
-    // Optionally, update localStorage
-    localStorage.setItem('userData', JSON.stringify({ ...profile, profileHash: newProfileHash }));
-
-    return newProfileHash;
+  async updateProfileNotificationHash(userAddress, notifications) {
+    try {
+      const userSession = JSON.parse(localStorage.getItem('userSession') || '{}');
+      const username = userSession.username;
+      
+      if (!username) {
+        console.warn("No username found in session, can't update profile notification hash");
+        return false;
+      }
+      
+      // First check if the user is registered on the blockchain
+      try {
+        const isAvailable = await UserAuthContract.methods
+          .isUsernameAvailable(username)
+          .call();
+          
+        if (isAvailable) {
+          // User is not registered on blockchain, just use localStorage
+          console.log("User not registered on blockchain, using localStorage only for notifications");
+          return true;
+        }
+        
+        // User is registered, proceed with blockchain/IPFS approach
+        const profileHash = await UserAuthContract.methods.login(username).call({ from: userAddress });
+        if (!profileHash) {
+          console.warn("No profile hash found for user");
+          return false;
+        }
+        
+        try {
+          // Fetch the profile from IPFS
+          const profileBuffer = await getFromIPFS(profileHash);
+          const profile = JSON.parse(profileBuffer.toString());
+          
+          // Upload notifications to IPFS
+          const notificationsStr = JSON.stringify(notifications);
+          const notificationHash = await uploadToIPFS(notificationsStr);
+          
+          // Update profile with new notification hash
+          profile.notificationHash = notificationHash;
+          
+          // Upload updated profile to IPFS
+          const updatedProfileHash = await uploadToIPFS(JSON.stringify(profile));
+          
+          // Update profile hash on blockchain
+          await UserAuthContract.methods
+            .updateProfile(updatedProfileHash)
+            .send({ from: userAddress });
+            
+          return true;
+        } catch (error) {
+          console.error("Failed to update notifications in IPFS:", error);
+          // Still return true since we saved to localStorage
+          return true;
+        }
+      } catch (error) {
+        console.error("Error checking if user is registered:", error);
+        return false;
+      }
+    } catch (error) {
+      console.error("Error updating profile notification hash:", error);
+      return false;
+    }
   }
 
-  // Add a new notification
+  // Add a notification for a user
   async addNotification(userAddress, notification) {
     try {
-      // Ensure notification has required fields
-      const fullNotification = {
-        id: Date.now().toString(),
-        timestamp: Date.now(),
-        read: false,
-        ...notification
-      };
-
+      // Add timestamp if not provided
+      if (!notification.timestamp) {
+        notification.timestamp = new Date().toISOString();
+      }
+      
+      // Add read status if not provided
+      if (notification.read === undefined) {
+        notification.read = false;
+      }
+      
       // Get existing notifications
       const notifications = await this.getNotifications(userAddress);
       
-      // Add new notification at the beginning
-      notifications.unshift(fullNotification);
+      // Add new notification
+      notifications.unshift(notification);
       
-      // Save to localStorage
+      // Save to localStorage (this will always happen as a backup)
       localStorage.setItem(`${this.notificationsKey}_${userAddress}`, JSON.stringify(notifications));
       
-      // Save to IPFS for persistence
+      // Try to update on blockchain/IPFS if possible
       try {
-        const ipfsHash = await uploadToIPFS(JSON.stringify(notifications));
-        localStorage.setItem(`${this.notificationsKey}_hash_${userAddress}`, ipfsHash);
-        // Update the user's profile with the new notification hash
-        await this.updateProfileNotificationHash(userAddress, ipfsHash);
+        await this.updateProfileNotificationHash(userAddress, notifications);
       } catch (error) {
-        console.error("Failed to save notifications to IPFS or update profile:", error);
+        console.error("Failed to update notification hash on blockchain, but saved to localStorage:", error);
       }
       
-      return fullNotification;
+      // Dispatch event for real-time updates
+      window.dispatchEvent(new Event('notifications-updated'));
+      
+      return true;
     } catch (error) {
       console.error("Error adding notification:", error);
-      return null;
+      return false;
     }
   }
 
@@ -155,24 +212,34 @@ class NotificationService {
     try {
       const notifications = await this.getNotifications(userAddress);
       
+      // If no notifications, return empty array
+      if (!notifications || notifications.length === 0) {
+        return [];
+      }
+      
       const updatedNotifications = notifications.map(notification => {
         return { ...notification, read: true };
       });
       
+      // Save to localStorage first (this will always work)
       localStorage.setItem(`${this.notificationsKey}_${userAddress}`, JSON.stringify(updatedNotifications));
       
-      // Update IPFS
+      // Dispatch event for real-time updates
+      window.dispatchEvent(new Event('notifications-updated'));
+      
+      // No need to update IPFS in development environment
+      // The updateProfileNotificationHash will handle this properly
       try {
-        const ipfsHash = await uploadToIPFS(JSON.stringify(updatedNotifications));
-        localStorage.setItem(`${this.notificationsKey}_hash_${userAddress}`, ipfsHash);
+        await this.updateProfileNotificationHash(userAddress, updatedNotifications);
       } catch (error) {
         console.error("Failed to update notifications in IPFS:", error);
+        // Continue since we already saved to localStorage
       }
       
       return updatedNotifications;
     } catch (error) {
       console.error("Error marking all notifications as read:", error);
-      return null;
+      return [];
     }
   }
 

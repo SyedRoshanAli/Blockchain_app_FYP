@@ -138,7 +138,28 @@ const NotificationsPage = () => {
               </div>
               <div className="notification-content">
                 <div className="notification-message">
-                  {notification.message}
+                  {notification.content || (
+                    <>
+                      {notification.type === notificationService.notificationTypes.LIKE && (
+                        <span><strong>{notification.sourceUser}</strong> liked your post {notification.postPreview ? `"${notification.postPreview}"` : ""}</span>
+                      )}
+                      {notification.type === notificationService.notificationTypes.COMMENT && (
+                        <span><strong>{notification.sourceUser}</strong> commented on your post</span>
+                      )}
+                      {notification.type === notificationService.notificationTypes.FOLLOW && (
+                        <span><strong>{notification.sourceUser}</strong> started following you</span>
+                      )}
+                      {notification.type === notificationService.notificationTypes.FOLLOW_REQUEST && (
+                        <span><strong>{notification.sourceUser}</strong> requested to follow you</span>
+                      )}
+                      {notification.type === notificationService.notificationTypes.MESSAGE && (
+                        <span>New message from <strong>{notification.sourceUser}</strong></span>
+                      )}
+                      {notification.type === notificationService.notificationTypes.SYSTEM && (
+                        <span>{notification.message || "System notification"}</span>
+                      )}
+                    </>
+                  )}
                 </div>
                 <div className="notification-time">
                   {formatTime(notification.timestamp)}

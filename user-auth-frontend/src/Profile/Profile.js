@@ -1,50 +1,56 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { UserAuthContract, CreatePostContract, FollowRelationshipContract } from "../UserAuth";
 import { 
     Plus, 
     Camera, 
-    LogOut, 
+    Calendar, 
+    MapPin, 
+    Link as LinkIcon, 
     Heart, 
     MessageCircle, 
-    Share2, 
-    X, 
-    Settings,
+    Repeat, 
+    Share,
+    Share2,
     User,
+    Users,
+    Bell,
+    Home,
+    Bookmark,
+    Settings,
+    LogOut,
+    Search,
+    MessageSquare,
     Moon,
     Sun,
-    Home,
-    Search,
-    Bell,
-    MessageSquare,
-    Bookmark,
-    Users,
-    TrendingUp,
-    Hash,
-    HelpCircle,
-    Shield,
-    Pencil,
-    MoreVertical,
-    Edit,
-    Trash,
-    Eye,
-    EyeOff,
     MoreHorizontal,
     File,
     Send,
-    BarChart
+    BarChart,
+    X,
+    Shield,
+    TrendingUp,
+    Hash,
+    HelpCircle,
+    Eye,
+    EyeOff,
+    Pencil,
+    Edit,
+    Trash,
+    MoreVertical
 } from "lucide-react";
 import "./Profile.css";
 import { toast } from "react-hot-toast";
 import { format } from 'date-fns';
 import { ethers } from 'ethers';
-import { messageService } from '../services/messageService';
+import messageService from '../services/messageService'; 
+import { notificationService } from '../services/notificationService';
 import FollowModal from './FollowModal';
 import { checkCorrectNetwork, switchToCorrectNetwork } from '../utils/networkHelpers';
-import { getFromIPFS } from '../ipfs';
+import { getFromIPFS, IPFS_GATEWAY, IPFS_GATEWAYS } from '../ipfs';
+import { getIpfsUrl, extractMediaUrls, getWorkingMediaUrl, generatePlaceholderImage } from '../utils/ipfsUtils';
 import PostModal from '../components/PostModal';
 import { cleanupFollowRequests, resetAllUserData } from '../utils/cleanupStorage';
-import { notificationService } from '../services/notificationService';
 import NotificationBadge from '../components/Notifications/NotificationBadge';
 
 // Add this immediately at the beginning of your code (outside any function)
@@ -385,6 +391,30 @@ function ProfilePage() {
                         likes: likes,
                         isLikedByMe: isLikedByMe
                     };
+                    
+                    // Fetch the actual content from IPFS
+                    try {
+                        const contentBuffer = await getFromIPFS(post.contentHash);
+                        const content = JSON.parse(contentBuffer.toString());
+                        post.content = content.text || '';
+                        post.mediaUrl = content.mediaUrl || null;
+                        
+                        // Store in localStorage for faster access next time
+                        const postContent = JSON.parse(localStorage.getItem('postContent') || '{}');
+                        postContent[post.contentHash] = content;
+                        localStorage.setItem('postContent', JSON.stringify(postContent));
+                    } catch (ipfsError) {
+                        console.error(`Error fetching content from IPFS for post ${postId}:`, ipfsError);
+                        
+                        // Try to get from localStorage as fallback
+                        const postContent = JSON.parse(localStorage.getItem('postContent') || '{}');
+                        if (postContent[post.contentHash]) {
+                            post.content = postContent[post.contentHash].text || '';
+                            post.mediaUrl = postContent[post.contentHash].mediaUrl || null;
+                        } else {
+                            post.content = 'Content unavailable';
+                        }
+                    }
                     
                     userPosts.push(post);
                 } catch (err) {
@@ -765,7 +795,7 @@ function ProfilePage() {
         
         try {
             // Get current user's username from localStorage
-            const userSession = JSON.parse(localStorage.getItem('userSession')) || {};
+            const userSession = JSON.parse(localStorage.getItem('userSession') || '{}');
             const currentUsername = userSession.username;
             
             // Check if we're following this user
@@ -921,577 +951,605 @@ function ProfilePage() {
             const sourceUsername = await getUsernameByAddress(currentAccount);
             const displayName = sourceUsername || currentAccount.substring(0, 6) + '...' + currentAccount.substring(38);
             
-            // Create notification
-            await notificationService.createFollowRequestNotification(
-                recipientAddress,
-                displayName
-            );
+            // Create notification with proper timestamp and ensure it's marked as unread
+            const notification = {
+                id: Date.now().toString(),
+                type: notificationService.notificationTypes.FOLLOW_REQUEST,
+                from: displayName,
+                fromAddress: currentAccount,
+                message: `${displayName} has requested to follow you`,
+                timestamp: new Date().toISOString(),
+                read: false
+            };
+            
+            // Add notification for the recipient
+            await notificationService.addNotification(recipientAddress, notification);
+            
+            // Dispatch event to update notification badges
+            window.dispatchEvent(new Event('new-notification'));
+            
         } catch (error) {
             console.error("Error sending follow request:", error);
-            toast.error("Failed to send follow request. Please try again.");
+            toast.error("Failed to send follow request");
         }
     };
 
-    // Add this PostCard component in your Profile.js file, similar to the one in HomePage.js
-    const PostCard = ({ post }) => {
-        const [postContent, setPostContent] = useState(post.content || null);
-        const [loading, setLoading] = useState(!post.content);
-        const [error, setError] = useState(null);
-        
+    const MediaItem = ({ mediaUrl }) => {
+        const [displayUrl, setDisplayUrl] = useState(null);
+        const [isLoading, setIsLoading] = useState(true);
+        const [hasError, setHasError] = useState(false);
+        const [gatewayAttempts, setGatewayAttempts] = useState(0);
+        const maxGatewayAttempts = IPFS_GATEWAYS.length;
+
+        // Validate IPFS hash format
+        const isValidIpfsHash = (hash) => {
+            // Basic validation - IPFS hashes typically start with 'Qm' and are 46 characters long
+            if (!hash) return false;
+            return hash.startsWith('Qm') && hash.length >= 46;
+        };
+
         useEffect(() => {
-            if (!post.content) {
-                const fetchPostContent = async () => {
-                    try {
-                        setLoading(true);
-                        setError(null);
-                        const contentHash = post.contentHash;
-                        
-                        // ALWAYS check localStorage first as our primary source
-                        const localPosts = JSON.parse(localStorage.getItem('localPosts') || '{}');
-                        if (localPosts[contentHash]) {
-                            console.log("Found post in localStorage:", contentHash);
-                            setPostContent(localPosts[contentHash]);
-                            setLoading(false);
+            const loadMedia = async () => {
+                try {
+                    // Handle different types of media input
+                    if (!mediaUrl) {
+                        setHasError(true);
+                        setIsLoading(false);
+                        return;
+                    }
+
+                    setIsLoading(true);
+                    setHasError(false);
+                    
+                    // Handle media object with hash property
+                    if (typeof mediaUrl === 'object' && mediaUrl.hash) {
+                        // Validate the hash
+                        if (!isValidIpfsHash(mediaUrl.hash)) {
+                            console.error(`Invalid IPFS hash format in object: ${mediaUrl.hash}`);
+                            setHasError(true);
+                            setIsLoading(false);
                             return;
                         }
                         
-                        // Try to get content from IPFS
-                        try {
-                            const contentBuffer = await getFromIPFS(contentHash);
-                            
-                            // Try to parse the data
-                            try {
-                                const contentText = new TextDecoder().decode(contentBuffer);
-                                const postData = JSON.parse(contentText);
-                                
-                                // Cache the successfully retrieved post
-                                localPosts[contentHash] = postData;
-                                localStorage.setItem('localPosts', JSON.stringify(localPosts));
-                                
-                                setPostContent(postData);
-                                
-                                // Also attach to the post object for the modal
-                                post.content = postData;
-                                
-                            } catch (parseError) {
-                                console.error("Error parsing post data:", parseError);
-                                throw new Error("Could not parse post data");
-                            }
-                        } catch (ipfsError) {
-                            console.error("IPFS retrieval failed:", ipfsError);
-                            
-                            // Create placeholder content with blockchain data
-                            const fallbackContent = {
-                                text: "Post created at " + formatDate(post.timestamp),
-                                timestamp: post.timestamp,
-                                media: [],
-                                tags: [],
-                                creator: post.creator
-                            };
-                            
-                            // Store this placeholder in localStorage for future use
-                            localPosts[contentHash] = fallbackContent;
-                            localStorage.setItem('localPosts', JSON.stringify(localPosts));
-                            
-                            setPostContent(fallbackContent);
+                        // First check if we have a cached working URL for this hash
+                        const gatewayCache = JSON.parse(localStorage.getItem('ipfsGatewayCache') || '{}');
+                        if (gatewayCache[mediaUrl.hash]) {
+                            console.log(`Using cached gateway URL for ${mediaUrl.hash}: ${gatewayCache[mediaUrl.hash]}`);
+                            setDisplayUrl(gatewayCache[mediaUrl.hash]);
+                            return;
                         }
-                    } catch (error) {
-                        console.error("Error in post content processing:", error);
-                        setError(error.message);
-                    } finally {
-                        setLoading(false);
+                        
+                        // Try the proxy approach first
+                        try {
+                            const proxyUrl = `/.netlify/functions/ipfs-proxy?hash=${encodeURIComponent(mediaUrl.hash)}`;
+                            console.log(`Trying proxy for media: ${proxyUrl}`);
+                            setDisplayUrl(proxyUrl);
+                        } catch (error) {
+                            // If proxy fails, fall back to direct gateway URLs
+                            const url = getIpfsUrl(mediaUrl.hash, gatewayAttempts);
+                            console.log(`Proxy failed, trying direct gateway ${gatewayAttempts}: ${url}`);
+                            setDisplayUrl(url);
+                        }
+                        return;
                     }
-                };
-                
-                fetchPostContent();
-            }
-        }, [post.contentHash, post.timestamp, post.creator, post.content]);
-        
-        useEffect(() => {
-            // Always load comments on mount to get the count and preview top 3
-            const fetchInitialData = async () => {
-                try {
-                    // Get the current user's address first
-                    const accounts = await window.ethereum.request({
-                        method: "eth_requestAccounts",
-                    });
-                    setCurrentAddress(accounts[0].toLowerCase());
                     
-                    // Fetch comments to display count and top 3 by default
-                    await fetchComments(true);
+                    // Handle media object with previewUrl property (for local testing)
+                    if (typeof mediaUrl === 'object' && mediaUrl.previewUrl) {
+                        setDisplayUrl(mediaUrl.previewUrl);
+                        setIsLoading(false);
+                        return;
+                    }
+                    
+                    // If it's an IPFS URL string, try to use our gateway system
+                    if (typeof mediaUrl === 'string' && mediaUrl.includes('/ipfs/')) {
+                        // Extract the hash from the URL
+                        const hashMatch = mediaUrl.match(/\/ipfs\/([^\/]+)/);
+                        if (hashMatch && hashMatch[1]) {
+                            const hash = hashMatch[1];
+                            
+                            // Validate the IPFS hash
+                            if (!isValidIpfsHash(hash)) {
+                                console.error(`Invalid IPFS hash format in URL: ${hash}`);
+                                setHasError(true);
+                                setIsLoading(false);
+                                return;
+                            }
+                            
+                            // First check if we have a cached working URL for this hash
+                            const gatewayCache = JSON.parse(localStorage.getItem('ipfsGatewayCache') || '{}');
+                            if (gatewayCache[hash]) {
+                                console.log(`Using cached gateway URL for ${hash}: ${gatewayCache[hash]}`);
+                                setDisplayUrl(gatewayCache[hash]);
+                                return;
+                            }
+                            
+                            // Try the proxy approach first
+                            try {
+                                const proxyUrl = `/.netlify/functions/ipfs-proxy?hash=${encodeURIComponent(hash)}`;
+                                console.log(`Trying proxy for media: ${proxyUrl}`);
+                                setDisplayUrl(proxyUrl);
+                            } catch (error) {
+                                // If proxy fails, fall back to direct gateway URLs
+                                const url = getIpfsUrl(hash, gatewayAttempts);
+                                console.log(`Proxy failed, trying direct gateway ${gatewayAttempts}: ${url}`);
+                                setDisplayUrl(url);
+                            }
+                            return;
+                        }
+                    }
+                    
+                    // If it's a direct string URL, use it as is
+                    if (typeof mediaUrl === 'string') {
+                        setDisplayUrl(mediaUrl);
+                        setIsLoading(false);
+                        return;
+                    }
+                    
+                    // If we got here, we couldn't determine how to handle the media
+                    console.error("Unrecognized media format:", mediaUrl);
+                    setHasError(true);
+                    setIsLoading(false);
                 } catch (error) {
-                    console.error("Error loading initial comment data:", error);
+                    console.error("Error setting up media URL:", error);
+                    setHasError(true);
+                    setIsLoading(false);
                 }
             };
             
-            fetchInitialData();
-        }, [post.id]);
+            loadMedia();
+        }, [mediaUrl, gatewayAttempts]);
+
+        // Handle successful media load
+        const handleMediaLoad = () => {
+            console.log(`Successfully loaded media from: ${displayUrl}`);
+            setIsLoading(false);
+            
+            // Cache the working URL if it's a gateway URL
+            if (mediaUrl && typeof mediaUrl === 'object' && mediaUrl.hash && displayUrl.includes('/ipfs/')) {
+                const gatewayCache = JSON.parse(localStorage.getItem('ipfsGatewayCache') || '{}');
+                gatewayCache[mediaUrl.hash] = displayUrl;
+                localStorage.setItem('ipfsGatewayCache', JSON.stringify(gatewayCache));
+                console.log(`Cached working URL for ${mediaUrl.hash}: ${displayUrl}`);
+            } else if (typeof mediaUrl === 'string' && mediaUrl.includes('ipfs://') && displayUrl.includes('/ipfs/')) {
+                const hash = mediaUrl.replace('ipfs://', '');
+                const gatewayCache = JSON.parse(localStorage.getItem('ipfsGatewayCache') || '{}');
+                gatewayCache[hash] = displayUrl;
+                localStorage.setItem('ipfsGatewayCache', JSON.stringify(gatewayCache));
+                console.log(`Cached working URL for ${hash}: ${displayUrl}`);
+            }
+        };
+        
+        // Handle media load error
+        const handleMediaError = () => {
+            console.error(`Failed to load media from: ${displayUrl}`);
+            
+            // If using proxy and it failed, try direct gateways
+            if (displayUrl.includes('ipfs-proxy')) {
+                console.log(`Proxy failed, trying direct gateways`);
+                if (typeof mediaUrl === 'object' && mediaUrl.hash) {
+                    const url = getIpfsUrl(mediaUrl.hash, 0);
+                    setDisplayUrl(url);
+                } else if (typeof mediaUrl === 'string' && mediaUrl.includes('ipfs://')) {
+                    const hash = mediaUrl.replace('ipfs://', '');
+                    const url = getIpfsUrl(hash, 0);
+                    setDisplayUrl(url);
+                }
+                return;
+            }
+            
+            // Try next gateway if available
+            if (gatewayAttempts < maxGatewayAttempts - 1) {
+                console.log(`Trying next gateway (${gatewayAttempts + 1}/${maxGatewayAttempts})`);
+                setGatewayAttempts(prev => prev + 1);
+            } else {
+                console.error("All gateways failed, showing error state");
+                setHasError(true);
+                setIsLoading(false);
+            }
+        };
+
+        // Determine media type based on file extension, URL, or mediaUrl object
+        const getMediaType = () => {
+            // If mediaUrl is an object with a type property
+            if (typeof mediaUrl === 'object' && mediaUrl.type) {
+                if (mediaUrl.type.startsWith('image/')) return 'image';
+                if (mediaUrl.type.startsWith('video/')) return 'video';
+            }
+            
+            // If we have a URL string, try to determine type from extension
+            if (typeof displayUrl === 'string') {
+                const url = displayUrl.toLowerCase();
+                // Check for image extensions
+                if (url.endsWith('.jpg') || url.endsWith('.jpeg') || 
+                    url.endsWith('.png') || url.endsWith('.gif') || 
+                    url.endsWith('.webp') || url.endsWith('.svg')) {
+                    return 'image';
+                }
+                
+                // Check for video extensions
+                if (url.endsWith('.mp4') || url.endsWith('.webm') || 
+                    url.endsWith('.ogg') || url.endsWith('.mov')) {
+                    return 'video';
+                }
+            }
+            
+            // If mediaUrl is an object with a name property
+            if (typeof mediaUrl === 'object' && mediaUrl.name) {
+                const name = mediaUrl.name.toLowerCase();
+                // Check for image extensions
+                if (name.endsWith('.jpg') || name.endsWith('.jpeg') || 
+                    name.endsWith('.png') || name.endsWith('.gif') || 
+                    name.endsWith('.webp') || name.endsWith('.svg')) {
+                    return 'image';
+                }
+                
+                // Check for video extensions
+                if (name.endsWith('.mp4') || name.endsWith('.webm') || 
+                    name.endsWith('.ogg') || name.endsWith('.mov')) {
+                    return 'video';
+                }
+            }
+            
+            // Default to image if we can't determine
+            return 'image';
+        };
+
+        if (isLoading && !displayUrl) {
+            return (
+                <div className="media-loading">
+                    <div className="spinner"></div>
+                    <p>Loading media...</p>
+                </div>
+            );
+        }
+
+        if (hasError) {
+            return (
+                <div className="media-error">
+                    <p>Media unavailable</p>
+                </div>
+            );
+        }
+
+        const mediaType = getMediaType();
+
+        return mediaType === 'video' ? (
+            <div className="media-container">
+                <video 
+                    src={displayUrl} 
+                    controls 
+                    className="media-content"
+                    style={{
+                        maxWidth: '100%',
+                        width: '100%',
+                        height: 'auto',
+                        display: 'block',
+                        margin: '0 auto',
+                        borderRadius: '8px',
+                        objectFit: 'contain'
+                    }}
+                    onLoadedData={handleMediaLoad}
+                    onError={handleMediaError}
+                />
+                {isLoading && (
+                    <div className="media-loading-overlay">
+                        <div className="spinner"></div>
+                        <p>Loading video... ({gatewayAttempts + 1}/{maxGatewayAttempts})</p>
+                    </div>
+                )}
+            </div>
+        ) : (
+            <div className="media-container">
+                <img 
+                    src={displayUrl} 
+                    alt="Post media" 
+                    className="media-content"
+                    style={{
+                        maxWidth: '100%',
+                        width: '100%',
+                        height: 'auto',
+                        display: 'block',
+                        margin: '0 auto',
+                        borderRadius: '8px',
+                        objectFit: 'contain'
+                    }}
+                    onLoad={handleMediaLoad}
+                    onError={handleMediaError}
+                />
+                {isLoading && (
+                    <div className="media-loading-overlay">
+                        <div className="spinner"></div>
+                        <p>Loading image... ({gatewayAttempts + 1}/{maxGatewayAttempts})</p>
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    const PostCard = ({ post }) => {
+        const [postContent, setPostContent] = useState('');
+        const [mediaUrl, setMediaUrl] = useState(null);
+        const [isExpanded, setIsExpanded] = useState(false);
+        const [showComments, setShowComments] = useState(false);
+        const [comments, setComments] = useState([]);
+        const [commentText, setCommentText] = useState('');
+        const [isLoadingComments, setIsLoadingComments] = useState(false);
 
         useEffect(() => {
-            if (showComments) {
+            // Load post content when component mounts
+            loadPostContent();
+            // Load initial comments
+            fetchComments(true);
+        }, [post.id]);
+        
+        const loadPostContent = async () => {
+            try {
+                // Check if we already have the content in the post object
+                if (post.content) {
+                    setPostContent(post.content);
+                    if (post.mediaUrl) {
+                        setMediaUrl(post.mediaUrl);
+                    }
+                    return;
+                }
+                
+                // Try to get from localStorage first
+                const postContent = JSON.parse(localStorage.getItem('postContent') || '{}');
+                if (postContent[post.contentHash]) {
+                    setPostContent(postContent[post.contentHash].text || '');
+                    
+                    // Use the utility function to extract media URLs
+                    const mediaUrls = extractMediaUrls(postContent[post.contentHash]);
+                    if (mediaUrls.length > 0) {
+                        console.log("Setting media URL from localStorage:", mediaUrls[0]);
+                        setMediaUrl(mediaUrls[0]);
+                    }
+                    return;
+                }
+                
+                // If not in localStorage, fetch from IPFS
+                try {
+                    console.log("Fetching content from IPFS:", post.contentHash);
+                    const contentBuffer = await getFromIPFS(post.contentHash);
+                    const content = JSON.parse(contentBuffer.toString());
+                    console.log("IPFS content retrieved:", content);
+                    
+                    setPostContent(content.text || '');
+                    
+                    // Use the utility function to extract media URLs
+                    const mediaUrls = extractMediaUrls(content);
+                    if (mediaUrls.length > 0) {
+                        console.log("Setting media URL from IPFS:", mediaUrls[0]);
+                        setMediaUrl(mediaUrls[0]);
+                    }
+                    
+                    // Cache for future use
+                    postContent[post.contentHash] = content;
+                    localStorage.setItem('postContent', JSON.stringify(postContent));
+                } catch (ipfsError) {
+                    console.error(`Error fetching content from IPFS for post ${post.id}:`, ipfsError);
+                    
+                    // Try to get from localPosts as a last resort
+                    const localPosts = JSON.parse(localStorage.getItem('localPosts') || '{}');
+                    if (localPosts[post.contentHash]) {
+                        const content = localPosts[post.contentHash];
+                        setPostContent(content.text || '');
+                        
+                        // Use the utility function to extract media URLs
+                        const mediaUrls = extractMediaUrls(content);
+                        if (mediaUrls.length > 0) {
+                            console.log("Setting media URL from localPosts:", mediaUrls[0]);
+                            setMediaUrl(mediaUrls[0]);
+                        }
+                    } else {
+                        setPostContent('Content unavailable');
+                    }
+                }
+            } catch (error) {
+                console.error(`Error loading content for post ${post.id}:`, error);
+                setPostContent('Content unavailable');
+            }
+        };
+        
+        const formatTimestamp = (timestamp) => {
+            const date = new Date(timestamp);
+            return format(date, 'MMM d, yyyy · h:mm a');
+        };
+        
+        const handleLike = async () => {
+            // Like functionality implementation
+            console.log("Like clicked for post:", post.id);
+        };
+        
+        const toggleComments = () => {
+            setShowComments(!showComments);
+            if (!showComments) {
                 fetchComments(false);
             }
-        }, [showComments]);
-
-        const fetchComments = async (topOnly = false) => {
-            setIsLoadingComments(true);
-            
+        };
+        
+        const fetchComments = async (previewOnly = false) => {
             try {
-                // Get comment references from localStorage
-                const commentRefs = JSON.parse(localStorage.getItem('postCommentRefs') || '{}');
-                const postCommentRefs = commentRefs[post.id] || [];
+                setIsLoadingComments(true);
                 
-                // If there are no comments, set empty array and return
-                if (postCommentRefs.length === 0) {
+                // First check localStorage for cached comments
+                const commentRefs = JSON.parse(localStorage.getItem('postCommentRefs') || '{}');
+                const commentHashes = commentRefs[post.id] || [];
+                
+                // If we have no comments, return early
+                if (commentHashes.length === 0) {
                     setComments([]);
                     setIsLoadingComments(false);
                     return;
                 }
                 
-                // Get cached comments
-                const cachedComments = JSON.parse(localStorage.getItem('commentContent') || '{}');
+                // Sort comment hashes by timestamp (newest first)
+                commentHashes.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
                 
-                let commentsData = [];
+                // Limit to 3 comments if preview only
+                const hashesToFetch = previewOnly ? commentHashes.slice(0, 3) : commentHashes;
                 
-                // Process each comment reference
-                for (const ref of postCommentRefs) {
+                // Load comments from localStorage or IPFS
+                const commentContent = JSON.parse(localStorage.getItem('commentContent') || '{}');
+                const loadedComments = [];
+                
+                for (const hashObj of hashesToFetch) {
                     try {
-                        let commentData;
-                        
-                        // First check if we have it cached
-                        if (cachedComments[ref.hash]) {
-                            commentData = cachedComments[ref.hash];
-                        } else {
-                            // If not cached, try to fetch from IPFS
-                            try {
-                                const data = await getFromIPFS(ref.hash);
-                                const jsonData = JSON.parse(data.toString());
-                                commentData = jsonData;
-                                
-                                // Cache it for future
-                                cachedComments[ref.hash] = commentData;
-                                localStorage.setItem('commentContent', JSON.stringify(cachedComments));
-                            } catch (error) {
-                                console.error("Failed to fetch comment from IPFS:", error);
-                                // If we can't get it from IPFS, use the fallback data
-                                commentData = ref.data || {
-                                    id: ref.hash,
-                                    text: "Comment content unavailable",
-                                    authorName: ref.authorName || "Unknown",
-                                    timestamp: ref.timestamp || new Date().toISOString(),
-                                    likes: []
-                                };
-                            }
+                        // Try to get from localStorage first
+                        if (commentContent[hashObj.hash]) {
+                            loadedComments.push(commentContent[hashObj.hash]);
+                            continue;
                         }
                         
-                        commentsData.push(commentData);
+                        // If not in localStorage, get from IPFS
+                        const commentBuffer = await getFromIPFS(hashObj.hash);
+                        const comment = JSON.parse(commentBuffer.toString());
+                        
+                        // Cache for future use
+                        commentContent[hashObj.hash] = comment;
+                        
+                        loadedComments.push(comment);
                     } catch (error) {
-                        console.error("Error processing comment:", error);
+                        console.error(`Error loading comment ${hashObj.hash}:`, error);
                     }
                 }
                 
-                // Sort comments by timestamp, newest first
-                commentsData.sort((a, b) => {
-                    const dateA = new Date(a.timestamp);
-                    const dateB = new Date(b.timestamp);
-                    return dateB - dateA;
-                });
+                // Sort by timestamp (newest first)
+                loadedComments.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
                 
-                setComments(commentsData);
+                setComments(loadedComments);
+                localStorage.setItem('commentContent', JSON.stringify(commentContent));
             } catch (error) {
-                console.error("Failed to fetch comments:", error);
-                setComments([]);
+                console.error(`Error fetching comments for post ${post.id}:`, error);
             } finally {
                 setIsLoadingComments(false);
             }
         };
-
-        const handleCommentsClick = (e) => {
-            if (e) {
-                e.preventDefault(); // Prevent navigation
-                e.stopPropagation(); // Stop event bubbling
-            }
-            
-            setShowComments(!showComments);
-            if (!showComments) {
-                fetchComments(false); // fetch all comments
-            }
-        };
-
-        const handleAddComment = async () => {
-            if (!commentText.trim()) return;
-            
-            try {
-                const accounts = await window.ethereum.request({
-                    method: "eth_requestAccounts"
-                });
-                const currentAddress = accounts[0].toLowerCase();
-                
-                // Get current user's username
-                const userSession = JSON.parse(localStorage.getItem('userSession') || '{}');
-                const userData = JSON.parse(localStorage.getItem('userData') || '{}');
-                const currentUsername = userSession.username || userData.username;
-                
-                // Create new comment object
-                const newComment = {
-                    id: Date.now().toString(),
-                    text: commentText,
-                    authorAddress: currentAddress,
-                    authorName: currentUsername,
-                    timestamp: new Date().toISOString(),
-                    likes: []
-                };
-                
-                // Upload comment to IPFS
-                try {
-                    // Convert comment object to JSON string and then to buffer
-                    const commentString = JSON.stringify(newComment);
-                    const commentBuffer = Buffer.from(commentString);
-                    
-                    // Upload to IPFS using the existing uploadToIPFS function
-                    const { uploadToIPFS } = await import('../ipfs');
-                    const commentHash = await uploadToIPFS(commentBuffer);
-                    
-                    console.log("Uploaded comment to IPFS with hash:", commentHash);
-                    
-                    // Store the comment itself in localStorage as a cache
-                    const commentContent = JSON.parse(localStorage.getItem('commentContent') || '{}');
-                    commentContent[commentHash] = newComment;
-                    localStorage.setItem('commentContent', JSON.stringify(commentContent));
-                    
-                    // Store the comment hash in the post's comment list
-                    const commentRefs = JSON.parse(localStorage.getItem('postCommentRefs') || '{}');
-                    if (!commentRefs[post.id]) {
-                        commentRefs[post.id] = [];
-                    }
-                    
-                    // Add reference with timestamp for sorting
-                    commentRefs[post.id].push({
-                        hash: commentHash,
-                        timestamp: newComment.timestamp,
-                        authorName: currentUsername
-                    });
-                    
-                    localStorage.setItem('postCommentRefs', JSON.stringify(commentRefs));
-                    
-                    // Update UI immediately
-                    const updatedComments = [...comments, newComment];
-                    setComments(updatedComments);
-                    
-                    // Also keep in postComments for backward compatibility
-                    const allComments = JSON.parse(localStorage.getItem('postComments') || '{}');
-                    allComments[post.id] = updatedComments;
-                    localStorage.setItem('postComments', JSON.stringify(allComments));
-                    
-                    // Clear input
-                    setCommentText('');
-                    
-                    // Create notification for post owner if it's not the current user
-                    if (post.creator.toLowerCase() !== currentAddress) {
-                        // Similar notification logic as in HomePage.js
-                        // ... [notification code here]
-                    }
-                } catch (ipfsError) {
-                    console.error("Failed to upload comment to IPFS:", ipfsError);
-                    toast.error("Failed to store comment on IPFS. Saving locally only.");
-                    
-                    // Add to state anyway (localStorage only as fallback)
-                    const updatedComments = [...comments, newComment];
-                    setComments(updatedComments);
-                    
-                    const allComments = JSON.parse(localStorage.getItem('postComments') || '{}');
-                    allComments[post.id] = updatedComments;
-                    localStorage.setItem('postComments', JSON.stringify(allComments));
-                    
-                    setCommentText('');
-                }
-            } catch (error) {
-                console.error("Error adding comment:", error);
-                toast.error("Failed to add comment");
-            }
-        };
-
-        const handleLikeComment = async (commentId) => {
-            try {
-                const accounts = await window.ethereum.request({
-                    method: "eth_requestAccounts"
-                });
-                const currentAddress = accounts[0].toLowerCase();
-                
-                // Update comment likes
-                const updatedComments = comments.map(comment => {
-                    if (comment.id === commentId) {
-                        const isAlreadyLiked = comment.likes.includes(currentAddress);
-                        
-                        if (isAlreadyLiked) {
-                            // Unlike
-                            return {
-                                ...comment,
-                                likes: comment.likes.filter(addr => addr !== currentAddress)
-                            };
-                        } else {
-                            // Like
-                            return {
-                                ...comment,
-                                likes: [...comment.likes, currentAddress]
-                            };
-                        }
-                    }
-                    return comment;
-                });
-                
-                setComments(updatedComments);
-                
-                // Update cached comments
-                // Same storage logic as in HomePage.js
-                // ... [storage update code here]
-            } catch (error) {
-                console.error("Error liking comment:", error);
-                toast.error("Failed to like comment");
-            }
-        };
-
-        const formatCommentTime = (timestamp) => {
-            let date;
-            
-            // Check if timestamp is a string (ISO format) or a number (Unix timestamp)
-            if (typeof timestamp === 'string') {
-                date = new Date(timestamp);
-            } else {
-                date = new Date(timestamp); // Will handle numbers automatically
-            }
-            
-            const now = new Date();
-            const diffMs = now - date;
-            const diffSec = Math.floor(diffMs / 1000);
-            const diffMin = Math.floor(diffSec / 60);
-            const diffHour = Math.floor(diffMin / 60);
-            const diffDay = Math.floor(diffHour / 24);
-            
-            if (diffSec < 60) return `${diffSec}s`;
-            if (diffMin < 60) return `${diffMin}m`;
-            if (diffHour < 24) return `${diffHour}h`;
-            if (diffDay < 7) return `${diffDay}d`;
-            
-            // Return formatted date for older posts
-            return `${date.getDate()} ${date.toLocaleString('default', { month: 'short' })}`;
-        };
-
-        if (loading) {
-            return (
-                <div className="tweet-card animate-post">
-                    <div className="loading-spinner">
-                        <div className="spinner"></div>
-                        <p>Loading post...</p>
-                    </div>
-                </div>
-            );
-        }
         
         return (
-            <div 
-                className="tweet-card" 
-                onClick={(e) => {
-                    // Prevent any default behavior
-                    e.preventDefault();
-                    // Stop propagation to parent elements
-                    e.stopPropagation();
-                    // Call handlePostClick with the post data
-                    handlePostClick({...post, content: postContent});
-                }}
-            >
+            <div className="tweet-card">
                 <div className="tweet-header">
-                    <div className="tweet-meta">
-                        <span className="tweet-date">{formatDate(post.timestamp)}</span>
+                    <div className="tweet-user-info">
+                        <div className="tweet-avatar">
+                            {userData.username ? userData.username[0].toUpperCase() : "U"}
+                        </div>
+                        <div className="tweet-user-details">
+                            <span className="tweet-username">{userData.username || "User"}</span>
+                            <span className="tweet-time">{formatTimestamp(post.timestamp)}</span>
+                        </div>
                     </div>
-                    <div className="tweet-options">
-                        <button className="options-button">
+                    <div className="tweet-actions">
+                        <button className="tweet-menu-button">
                             <MoreHorizontal size={18} />
                         </button>
                     </div>
                 </div>
                 
                 <div className="tweet-content">
-                    {error ? (
-                        <p className="error-message">Error loading post content: {error}</p>
-                    ) : postContent ? (
-                        <>
-                            {postContent.text && (
-                                <p>{postContent.text}</p>
-                            )}
-                            
-                            {/* Display tags if any */}
-                            {postContent.tags && postContent.tags.length > 0 && (
-                                <div className="post-tags">
-                                    {postContent.tags.map((tag, index) => (
-                                        <span key={index} className="post-tag">
-                                            <Hash size={14} style={{marginRight: '4px'}} />
-                                            {tag}
-                                        </span>
-                                    ))}
-                                </div>
-                            )}
-                            
-                            {/* Display media files if any */}
-                            {postContent.media && postContent.media.length > 0 && (
-                                <div className="post-media-container">
-                                    {postContent.media.map((media, index) => (
-                                        <div key={index} className="post-media-item">
-                                            {media.type && media.type.startsWith('image/') ? (
-                                                <img 
-                                                    src={`https://ipfs.io/ipfs/${media.hash}`} 
-                                                    alt={media.name || "Post image"} 
-                                                    className="post-image" 
-                                                    loading="lazy"
-                                                    onError={(e) => {
-                                                        e.target.onerror = null;
-                                                        e.target.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 24 24' fill='none' stroke='%23ddd' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2' ry='2'/%3E%3Ccircle cx='8.5' cy='8.5' r='1.5'/%3E%3Cpolyline points='21 15 16 10 5 21'/%3E%3C/svg%3E";
-                                                        e.target.style.padding = "20px";
-                                                        e.target.style.background = "#f5f5f5";
-                                                    }}
-                                                />
-                                            ) : media.type && media.type.startsWith('video/') ? (
-                                                <video 
-                                                    src={`https://ipfs.io/ipfs/${media.hash}`} 
-                                                    controls
-                                                    className="post-video"
-                                                    onError={(e) => {
-                                                        e.target.onerror = null;
-                                                        e.target.style.display = "none";
-                                                        e.target.parentNode.innerHTML = "<div class='post-file'><svg width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'><path d='M12 2v8L22 7v8H12v7'></path></svg><span>Video unavailable</span></div>";
-                                                    }}
-                                                />
-                                            ) : (
-                                                <div className="post-file">
-                                                    <File size={24} />
-                                                    <span>{media.name || "File"}</span>
-                                                </div>
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
-                            )}
-                        </>
-                    ) : (
-                        <p>Post content unavailable</p>
+                    {postContent && (
+                        <p className={`tweet-text ${isExpanded ? 'expanded' : ''}`}>
+                            {postContent}
+                        </p>
                     )}
-                </div>
-                
-                <div className="tweet-actions">
-                    <button 
-                        className={`tweet-action-button ${post.isLikedByMe ? 'active' : ''}`} 
-                        onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handleLike(post.id);
-                        }}
-                    >
-                        {post.isLikedByMe ? (
-                            <Heart size={18} fill="#ef4444" color="#ef4444" />
-                        ) : (
-                            <Heart size={18} />
-                        )}
-                        <span>{post.likes.length > 0 ? post.likes.length : ''} Like{post.likes.length !== 1 ? 's' : ''}</span>
-                    </button>
-                    <button 
-                        className={`action-button ${showComments ? 'active' : ''}`} 
-                        onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handleCommentsClick(e);
-                        }}
-                    >
-                        <MessageSquare size={20} />
-                        <span>{comments.length > 0 ? comments.length : ''} Comment{comments.length !== 1 ? 's' : ''}</span>
-                    </button>
-                    <button className="tweet-action-button" onClick={(e) => e.stopPropagation()}>
-                        <Share2 size={18} />
-                        <span>Share</span>
-                    </button>
-                </div>
-
-                {/* Comments section with preview of top 3 */}
-                <div className={`comments-section ${showComments ? 'expanded' : ''}`}>
-                    {isLoadingComments ? (
-                        <div className="comment-loading">
-                            <div className="spinner-small"></div>
-                            <span>Loading comments...</span>
-                        </div>
-                    ) : (
-                        <>
-                            {/* Always show comment input */}
-                            <div className="add-comment">
-                                <div className="comment-input-container">
-                                    <input
-                                        type="text"
-                                        id="comment-input"
-                                        name="comment-input"
-                                        placeholder="Add a comment..."
-                                        value={commentText}
-                                        onChange={(e) => setCommentText(e.target.value)}
-                                        onClick={(e) => e.stopPropagation()}
-                                    />
-                                    <button 
-                                        className="post-comment-btn"
-                                        disabled={!commentText.trim()}
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleAddComment();
-                                        }}
-                                    >
-                                        Post
-                                    </button>
+                    
+                    {postContent && postContent.length > 280 && !isExpanded && (
+                        <button 
+                            className="read-more-button"
+                            onClick={() => setIsExpanded(true)}
+                        >
+                            Read more
+                        </button>
+                    )}
+                    
+                    {mediaUrl && (
+                        <MediaItem mediaUrl={mediaUrl} />
+                    )}
+                    
+                    <div className="tweet-actions-bar">
+                        <button 
+                            className={`action-button ${post.isLikedByMe ? 'liked' : ''}`}
+                            onClick={handleLike}
+                        >
+                            {post.isLikedByMe ? (
+                                <Heart size={18} fill="#ef4444" color="#ef4444" />
+                            ) : (
+                                <Heart size={18} />
+                            )}
+                            <span>{post.likes.length > 0 ? post.likes.length : ''}</span>
+                        </button>
+                        <button 
+                            className={`action-button ${showComments ? 'active' : ''}`}
+                            onClick={toggleComments}
+                        >
+                            <MessageSquare size={18} />
+                            <span>{comments.length > 0 ? comments.length : ''}</span>
+                        </button>
+                        <button className="action-button">
+                            <Share2 size={18} />
+                        </button>
+                    </div>
+                    
+                    {showComments && (
+                        <div className="comments-section">
+                            {isLoadingComments ? (
+                                <div className="loading-comments">
+                                    <div className="spinner-small"></div>
+                                    Loading comments...
                                 </div>
-                            </div>
-                            
-                            {/* Show top 3 comments always, or all comments when expanded */}
-                            {comments.length > 0 && (
-                                <div className="comments-list">
-                                    {(showComments ? comments : comments.slice(0, 3)).map((comment) => (
-                                        <div key={comment.id} className="comment-item">
-                                            <div className="comment-avatar">
-                                                {comment.authorName ? comment.authorName[0].toUpperCase() : "U"}
-                                            </div>
-                                            <div className="comment-content">
-                                                <div className="comment-header">
-                                                    <span className="comment-author">{comment.authorName || "Unknown User"}</span>
-                                                    <span className="comment-time">{formatCommentTime(comment.timestamp)}</span>
-                                                </div>
-                                                <p className="comment-text">{comment.text}</p>
-                                                <div className="comment-actions">
-                                                    <button
-                                                        className={`comment-like-btn ${comment.likes && Array.isArray(comment.likes) && comment.likes.includes(currentAddress) ? 'active' : ''}`}
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleLikeComment(comment.id);
-                                                        }}
-                                                    >
-                                                        <Heart size={14} />
-                                                        <span>{comment.likes && Array.isArray(comment.likes) ? comment.likes.length : 0}</span>
-                                                    </button>
-                                                </div>
-                                            </div>
+                            ) : (
+                                <>
+                                    <div className="comment-input-container">
+                                        <div className="comment-input-avatar">
+                                            {userData.username ? userData.username[0].toUpperCase() : "U"}
                                         </div>
-                                    ))}
-                                </div>
+                                        <div className="comment-input-wrapper">
+                                            <input
+                                                type="text"
+                                                placeholder="Add a comment..."
+                                                value={commentText}
+                                                onChange={(e) => setCommentText(e.target.value)}
+                                            />
+                                            <button 
+                                                className={`post-comment-btn ${!commentText.trim() ? 'disabled' : ''}`}
+                                                disabled={!commentText.trim()}
+                                                onClick={() => console.log("Adding comment:", commentText)}
+                                            >
+                                                <Send size={16} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="comments-list">
+                                        {comments.length > 0 ? (
+                                            comments.map((comment) => (
+                                                <div key={comment.id} className="comment-item">
+                                                    <div className="comment-avatar">
+                                                        {comment.authorName ? comment.authorName[0].toUpperCase() : "U"}
+                                                    </div>
+                                                    <div className="comment-content">
+                                                        <div className="comment-header">
+                                                            <span className="comment-author">{comment.authorName || "Unknown"}</span>
+                                                            <span className="comment-time">{formatTimestamp(comment.timestamp)}</span>
+                                                        </div>
+                                                        <p className="comment-text">{comment.text}</p>
+                                                        <div className="comment-actions">
+                                                            <button className="comment-like-btn">
+                                                                <Heart size={14} />
+                                                            </button>
+                                                            <button className="comment-reply-btn">
+                                                                Reply
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))
+                                        ) : (
+                                            <div className="no-comments">No comments yet. Be the first to comment!</div>
+                                        )}
+                                    </div>
+                                </>
                             )}
-                            
-                            {!showComments && comments.length > 0 && comments.length > 3 && (
-                                <button 
-                                    className="view-more-comments"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        setShowComments(true);
-                                    }}
-                                >
-                                    View all {comments.length} comments
-                                </button>
-                            )}
-                            
-                            {comments.length === 0 && (
-                                <p className="no-comments">No comments yet. Be the first to comment!</p>
-                            )}
-                        </>
+                        </div>
                     )}
                 </div>
             </div>
@@ -1766,10 +1824,9 @@ function ProfilePage() {
                                             <p>{error}</p>
                                                     </div>
                                     ) : posts.length === 0 ? (
-                                    <div className="no-tweets">
-                                            <h3>No tweets yet</h3>
-                                            <p>When you post, your tweets will show up here.</p>
-                                            <button className="create-first-tweet-button" onClick={handleCreateTweet}>
+                                    <div className="no-tweets-container">
+                                        <p>You haven't tweeted yet</p>
+                                        <button className="create-first-tweet-button" onClick={handleCreateTweet}>
                                             Create your first tweet
                                         </button>
                                     </div>

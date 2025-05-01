@@ -248,7 +248,10 @@ const Login = () => {
         const userData = localStorage.getItem('userData');
         const userSession = localStorage.getItem('userSession');
         
-        if (userData && userSession) {
+        // Check if user is coming from registration page
+        const fromRegistration = sessionStorage.getItem('fromRegistration');
+        
+        if (userData && userSession && !fromRegistration) {
             try {
                 // Parse the data to ensure it's valid
                 const parsedUserData = JSON.parse(userData);
@@ -265,6 +268,9 @@ const Login = () => {
                 localStorage.removeItem('userSession');
             }
         }
+        
+        // Clear the fromRegistration flag
+        sessionStorage.removeItem('fromRegistration');
     }, [navigate]);
 
     const handleInputChange = (e) => {

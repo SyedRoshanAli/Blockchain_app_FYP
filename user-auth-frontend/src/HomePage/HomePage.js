@@ -1,46 +1,44 @@
-import React, { useState, useEffect } from 'react';
-import { CreatePostContract, UserAuthContract } from "../UserAuth";
-import { format } from 'date-fns';
-import { 
-    Heart, 
-    MessageCircle, 
-    Share2, 
-    Home, 
-    Search, 
-    Bell, 
-    Bookmark, 
-    User, 
-    Settings,
-    MessageSquare,
-    Users,
-    TrendingUp,
-    Hash,
-    HelpCircle,
-    Shield,
-    LogOut,
-    Moon,
-    Sun,
-    Eye,
-    Mail,
-    Plus,
-    MoreHorizontal,
-    Calendar,
-    Image,
-    Link as LinkIcon,
-    File,
-    Repeat,
-    Send,
-    BarChart
-} from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from "react-router-dom";
 import { toast } from "react-hot-toast";
+import { CreatePostContract, UserAuthContract, FollowRelationshipContract } from "../UserAuth";
+import { format } from 'date-fns';
+import { 
+    Plus, 
+    Camera, 
+    Heart, 
+    MessageCircle, 
+    Share, 
+    Share2,
+    Search, 
+    User, 
+    Home, 
+    Bell, 
+    Bookmark, 
+    Settings, 
+    LogOut, 
+    MessageSquare, 
+    Moon, 
+    Sun, 
+    MoreHorizontal, 
+    Hash, 
+    Image, 
+    Video, 
+    File, 
+    Send,
+    BarChart,
+    Calendar,
+    Link as LinkIcon,
+    TrendingUp
+} from 'lucide-react';
 import './HomePage.css';
 import LogoImage from '../logo.png';
 import { cleanupFollowRequests } from '../utils/cleanupStorage';
-import { messageService } from '../services/messageService';
+import messageService from '../services/messageService';
 import { getFromIPFS } from '../ipfs';
+import { IPFS_GATEWAY, IPFS_GATEWAYS } from '../ipfs';
+import { getIpfsUrl, extractMediaUrls, getWorkingMediaUrl, generatePlaceholderImage } from '../utils/ipfsUtils';
 import PostModal from '../components/PostModal';
-import { FollowRelationshipContract } from '../UserAuth';
 import { notificationService } from '../services/notificationService';
 import NotificationBadge from '../components/Notifications/NotificationBadge';
 
@@ -607,7 +605,7 @@ const HomePage = () => {
                             creatorUsername = usernames[0];
                         }
                     }
-        } catch (error) {
+                } catch (error) {
                     console.error("Error getting post creator username:", error);
                 }
                 
@@ -621,7 +619,6 @@ const HomePage = () => {
                         // Find the post content specifically for this post's contentHash
                         if (localPosts[postToLike.contentHash]) {
                             const content = localPosts[postToLike.contentHash];
-                            console.log("Found post content for notification:", content);
                             
                             // Extract meaningful preview text from the post
                             if (content.text) {
@@ -633,33 +630,32 @@ const HomePage = () => {
                                 // If no text but has media, indicate that
                                 postPreview = `[Shared ${content.media.length} media item${content.media.length > 1 ? 's' : ''}]`;
                             }
-                        } else {
-                            console.log("No post content found in localStorage for hash:", postToLike.contentHash);
                         }
 
-                        // Create notification object with post preview
-                        const notification = {
-                            id: Date.now().toString(),
-                            type: 'like',
-                            fromUser: currentUsername,
-                            fromAddress: currentAddress,
-                            postId: postId.toString(),
-                            timestamp: new Date().toISOString(),
-                            read: false,
-                            postPreview: postPreview,
-                            contentHash: postToLike.contentHash // Add this to help debug
-                        };
-                        
-                        console.log("Creating notification with preview:", notification);
-                        
-                        // Add to notifications for the post creator
-                        const notifications = JSON.parse(localStorage.getItem('notifications') || '{}');
-                        if (!notifications[creatorUsername]) {
-                            notifications[creatorUsername] = [];
+                        try {
+                            // Create notification using the notification service
+                            const creatorAddress = postToLike.creator.toLowerCase();
+                            
+                            // Create notification object
+                            const notification = {
+                                type: notificationService.notificationTypes.LIKE,
+                                sourceUser: currentUsername,
+                                sourceAddress: currentAddress,
+                                postId: postId.toString(),
+                                content: `${currentUsername} liked your post: "${postPreview}"`,
+                                postPreview: postPreview
+                            };
+                            
+                            // Add notification to the creator's notifications
+                            await notificationService.addNotification(creatorAddress, notification);
+                            
+                            // Dispatch event to update notification badge
+                            window.dispatchEvent(new CustomEvent('new-notification'));
+                            
+                            console.log("Created like notification for user:", creatorUsername);
+                        } catch (error) {
+                            console.error("Error creating notification:", error);
                         }
-                        
-                        notifications[creatorUsername].push(notification);
-                        localStorage.setItem('notifications', JSON.stringify(notifications));
                     }
                 }
             }
@@ -674,57 +670,22 @@ const HomePage = () => {
             
             localStorage.setItem('likedPosts', JSON.stringify(likedPosts));
             
-            // Update UI immediately
-            setPosts(prevPosts => 
-                prevPosts.map(post => {
-                    if (post.id === postId) {
-                        const newLikeCount = isAlreadyLiked ? post.likes.length - 1 : post.likes.length + 1;
-                        const newLikes = isAlreadyLiked 
-                            ? post.likes.filter(addr => addr.toLowerCase() !== currentAddress)
-                            : [...post.likes, currentAddress];
-                        
-                        return {
-                            ...post,
-                            likes: newLikes,
-                            isLikedByMe: !isAlreadyLiked
-                        };
-                    }
-                    return post;
-                })
-            );
-            
-            // Add notification if post creator isn't the current user
-            const postData = await fetchPostData(postId);
-            if (postData && postData.creator !== currentAddress) {
-                const username = await getUsernameByAddress(currentAddress);
-                const displayName = username || currentAddress.substring(0, 6) + '...' + currentAddress.substring(38);
-                
-                // Create notification
-                let contentPreview = "your post";
-                
-                // Check if content exists and is a string
-                if (postData.content) {
-                    if (typeof postData.content === 'string') {
-                        contentPreview = postData.content.substring(0, 50) + (postData.content.length > 50 ? '...' : '');
-                    } else if (postData.content.text) {
-                        // Content is an object with a text property
-                        contentPreview = postData.content.text.substring(0, 50) + (postData.content.text.length > 50 ? '...' : '');
-                    } else if (postData.content.media && postData.content.media.length > 0) {
-                        // Content has media
-                        contentPreview = `[Shared media]`;
-                    }
+            // Update the posts state to reflect the like/unlike
+            setPosts(posts.map(post => {
+                if (post.id === postId) {
+                    const isLiked = !isAlreadyLiked;
+                    return {
+                        ...post,
+                        likes: isLiked ? post.likes + 1 : Math.max(0, post.likes - 1),
+                        isLiked: isLiked
+                    };
                 }
-                
-                await notificationService.createLikeNotification(
-                    postData.creator, 
-                    displayName, 
-                    postId,
-                    contentPreview
-                );
-            }
+                return post;
+            }));
+            
         } catch (error) {
             console.error("Error liking post:", error);
-            toast.error("Failed to like post");
+            toast.error("Failed to like post. Please try again.");
         }
     };
 
@@ -827,7 +788,10 @@ const HomePage = () => {
                     const localPosts = JSON.parse(localStorage.getItem('localPosts') || '{}');
                     if (localPosts[contentHash]) {
                         console.log("Found post in localStorage:", contentHash);
-                        setPostContent(localPosts[contentHash]);
+                        const content = localPosts[contentHash];
+                        setPostContent(content);
+                        
+                        // No need to try finding working URLs here, we'll handle that in the render
                         setLoading(false);
                         return;
                     }
@@ -871,10 +835,10 @@ const HomePage = () => {
                 } catch (error) {
                     console.error("Error in post content processing:", error);
                     setError(error.message);
-        } finally {
+                } finally {
                     setLoading(false);
-        }
-    };
+                }
+            };
 
             fetchPostContent();
         }, [post.contentHash, post.timestamp, post.creator]);
@@ -1040,17 +1004,51 @@ const HomePage = () => {
                     
                     // Create notification for post owner if it's not the current user
                     if (post.creator.toLowerCase() !== currentAddress) {
-                        const username = await getUsernameByAddress(currentAddress);
-                        const displayName = username || currentAddress.substring(0, 6) + '...' + currentAddress.substring(38);
-                        
-                        // Create notification
-                        await notificationService.createCommentNotification(
-                            post.creator,
-                            displayName,
-                            post.id,
-                            commentText,
-                            commentText.substring(0, 50) + (commentText.length > 50 ? '...' : '')
-                        );
+                        try {
+                            // Get username of post creator
+                            let creatorUsername = '';
+                            
+                            // Try to get from localStorage cache first
+                            const cachedUsernames = localStorage.getItem(`usernames_${post.creator.toLowerCase()}`);
+                            if (cachedUsernames) {
+                                const parsed = JSON.parse(cachedUsernames);
+                                if (parsed && parsed.length > 0) {
+                                    creatorUsername = parsed[0];
+                                }
+                            }
+                            
+                            if (!creatorUsername) {
+                                // Get from blockchain if not in cache
+                                const usernames = await UserAuthContract.methods
+                                    .getUsernames(post.creator)
+                                    .call();
+                                
+                                if (usernames && usernames.length > 0) {
+                                    creatorUsername = usernames[0];
+                                }
+                            }
+                            
+                            // Create notification using the notification service
+                            const notification = {
+                                type: notificationService.notificationTypes.COMMENT,
+                                sourceUser: currentUsername,
+                                sourceAddress: currentAddress,
+                                postId: post.id.toString(),
+                                commentText: commentText,
+                                content: `${currentUsername} commented on your post: "${commentText.substring(0, 30)}${commentText.length > 30 ? '...' : ''}"`,
+                                postPreview: commentText.substring(0, 50) + (commentText.length > 50 ? '...' : '')
+                            };
+                            
+                            // Add notification to the creator's notifications
+                            await notificationService.addNotification(post.creator.toLowerCase(), notification);
+                            
+                            // Dispatch event to update notification badge
+                            window.dispatchEvent(new CustomEvent('new-notification'));
+                            
+                            console.log("Created comment notification for user:", creatorUsername);
+                        } catch (error) {
+                            console.error("Error creating comment notification:", error);
+                        }
                     }
                 } catch (ipfsError) {
                     console.error("Failed to upload comment to IPFS:", ipfsError);
@@ -1280,38 +1278,7 @@ const HomePage = () => {
                             {postContent.media && postContent.media.length > 0 && (
                                 <div className="post-media-container">
                                     {postContent.media.map((media, index) => (
-                                        <div key={index} className="post-media-item">
-                                            {media.type && media.type.startsWith('image/') ? (
-                                                <img 
-                                                    src={`https://ipfs.io/ipfs/${media.hash}`} 
-                                                    alt={media.name || "Post image"} 
-                                                    className="post-image" 
-                                                    loading="lazy"
-                                                    onError={(e) => {
-                                                        e.target.onerror = null;
-                                                        e.target.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 24 24' fill='none' stroke='%23ddd' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2' ry='2'/%3E%3Ccircle cx='8.5' cy='8.5' r='1.5'/%3E%3Cpolyline points='21 15 16 10 5 21'/%3E%3C/svg%3E";
-                                                        e.target.style.padding = "20px";
-                                                        e.target.style.background = "#f5f5f5";
-                                                    }}
-                                                />
-                                            ) : media.type && media.type.startsWith('video/') ? (
-                                                <video 
-                                                    src={`https://ipfs.io/ipfs/${media.hash}`} 
-                                                    controls
-                                                    className="post-video"
-                                                    onError={(e) => {
-                                                        e.target.onerror = null;
-                                                        e.target.style.display = "none";
-                                                        e.target.parentNode.innerHTML = "<div class='post-file'><svg width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2'><path d='M12 2v8L22 7v8H12v7'></path></svg><span>Video unavailable</span></div>";
-                                                    }}
-                                                />
-                                            ) : (
-                                                <div className="post-file">
-                                                    <File size={24} />
-                                                    <span>{media.name || "File"}</span>
-                                                </div>
-                                            )}
-                                        </div>
+                                        <MediaItem key={index} media={media} />
                                     ))}
                                 </div>
                             )}
@@ -1437,6 +1404,270 @@ const HomePage = () => {
         );
     };
 
+    const MediaItem = ({ media }) => {
+        const [mediaUrl, setMediaUrl] = useState('');
+        const [isLoading, setIsLoading] = useState(true);
+        const [hasError, setHasError] = useState(false);
+        const [gatewayAttempts, setGatewayAttempts] = useState(0);
+        const maxGatewayAttempts = IPFS_GATEWAYS.length;
+        
+        // Function to validate IPFS hash format
+        const isValidIpfsHash = (hash) => {
+            if (!hash) return false;
+            // Basic validation - should start with Qm and be at least 46 chars
+            return hash.startsWith('Qm') && hash.length >= 46;
+        };
+
+        useEffect(() => {
+            const loadMedia = async () => {
+                try {
+                    // Check if media exists
+                    if (!media) {
+                        setHasError(true);
+                        setIsLoading(false);
+                        return;
+                    }
+                    
+                    // Handle case where media might be a string URL directly
+                    if (typeof media === 'string') {
+                        setMediaUrl(media);
+                        setIsLoading(false);
+                        return;
+                    }
+                    
+                    // If we have a preview URL stored (for local testing), use it directly
+                    if (media.previewUrl) {
+                        setMediaUrl(media.previewUrl);
+                        setIsLoading(false);
+                        return;
+                    }
+
+                    // Check if media hash exists
+                    if (!media.hash) {
+                        console.error('Media object has no hash:', media);
+                        setHasError(true);
+                        setIsLoading(false);
+                        return;
+                    }
+
+                    // Validate IPFS hash
+                    if (!isValidIpfsHash(media.hash)) {
+                        console.error(`Invalid IPFS hash format: ${media.hash}`);
+                        setHasError(true);
+                        setIsLoading(false);
+                        return;
+                    }
+
+                    setIsLoading(true);
+                    setHasError(false);
+                    
+                    // First check if we have a cached working URL for this hash
+                    const gatewayCache = JSON.parse(localStorage.getItem('ipfsGatewayCache') || '{}');
+                    if (gatewayCache[media.hash]) {
+                        console.log(`Using cached gateway URL for ${media.hash}: ${gatewayCache[media.hash]}`);
+                        setMediaUrl(gatewayCache[media.hash]);
+                        return;
+                    }
+                    
+                    // Try the proxy approach first
+                    try {
+                        const proxyUrl = `/.netlify/functions/ipfs-proxy?hash=${encodeURIComponent(media.hash)}`;
+                        console.log(`Trying proxy for media: ${proxyUrl}`);
+                        setMediaUrl(proxyUrl);
+                    } catch (error) {
+                        // If proxy fails, fall back to direct gateway URLs
+                        const url = getIpfsUrl(media.hash, gatewayAttempts);
+                        console.log(`Proxy failed, trying direct gateway ${gatewayAttempts}: ${url}`);
+                        setMediaUrl(url);
+                    }
+                } catch (error) {
+                    console.error("Error setting up media URL:", error);
+                    setHasError(true);
+                    setIsLoading(false);
+                }
+            };
+            
+            loadMedia();
+        }, [media, gatewayAttempts]);
+
+        // Handle successful media load
+        const handleMediaLoad = () => {
+            console.log(`Successfully loaded media from: ${mediaUrl}`);
+            setIsLoading(false);
+            
+            // Cache the working URL if it's a gateway URL
+            if (media && media.hash && mediaUrl.includes('/ipfs/')) {
+                const gatewayCache = JSON.parse(localStorage.getItem('ipfsGatewayCache') || '{}');
+                gatewayCache[media.hash] = mediaUrl;
+                localStorage.setItem('ipfsGatewayCache', JSON.stringify(gatewayCache));
+                console.log(`Cached working URL for ${media.hash}: ${mediaUrl}`);
+            }
+        };
+
+        // Handle media load error
+        const handleMediaError = () => {
+            console.error(`Failed to load media from: ${mediaUrl}`);
+            
+            // If using proxy and it failed, try direct gateways
+            if (mediaUrl.includes('ipfs-proxy')) {
+                console.log(`Proxy failed, trying direct gateways`);
+                const url = getIpfsUrl(media.hash, 0);
+                setMediaUrl(url);
+                return;
+            }
+            
+            // Try next gateway if available
+            if (gatewayAttempts < maxGatewayAttempts - 1) {
+                console.log(`Trying next gateway (${gatewayAttempts + 1}/${maxGatewayAttempts})`);
+                setGatewayAttempts(prev => prev + 1);
+            } else {
+                console.error("All gateways failed, showing error state");
+                setHasError(true);
+                setIsLoading(false);
+            }
+        };
+
+        if (isLoading && !mediaUrl) {
+            return (
+                <div className="post-media-item loading">
+                    <div className="media-loading-spinner">
+                        <div className="spinner"></div>
+                        <p>Loading media...</p>
+                    </div>
+                </div>
+            );
+        }
+
+        if (hasError) {
+            return (
+                <div className="post-media-item error">
+                    <div className="media-error">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#999" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                            <circle cx="8.5" cy="8.5" r="1.5"/>
+                            <polyline points="21 15 16 10 5 21"/>
+                        </svg>
+                        <p>Media unavailable</p>
+                    </div>
+                </div>
+            );
+        }
+
+        // Determine media type based on file extension, URL, or media.type
+        const getMediaType = () => {
+            // If media has a type property, use it
+            if (media && media.type) {
+                if (media.type.startsWith('image/')) return 'image';
+                if (media.type.startsWith('video/')) return 'video';
+            }
+            
+            // If we have a URL, try to determine type from extension
+            if (mediaUrl) {
+                const url = mediaUrl.toLowerCase();
+                // Check for image extensions
+                if (url.endsWith('.jpg') || url.endsWith('.jpeg') || 
+                    url.endsWith('.png') || url.endsWith('.gif') || 
+                    url.endsWith('.webp') || url.endsWith('.svg')) {
+                    return 'image';
+                }
+                
+                // Check for video extensions
+                if (url.endsWith('.mp4') || url.endsWith('.webm') || 
+                    url.endsWith('.ogg') || url.endsWith('.mov')) {
+                    return 'video';
+                }
+            }
+            
+            // If media has a name property, try to determine type from it
+            if (media && media.name) {
+                const name = media.name.toLowerCase();
+                // Check for image extensions
+                if (name.endsWith('.jpg') || name.endsWith('.jpeg') || 
+                    name.endsWith('.png') || name.endsWith('.gif') || 
+                    name.endsWith('.webp') || name.endsWith('.svg')) {
+                    return 'image';
+                }
+                
+                // Check for video extensions
+                if (name.endsWith('.mp4') || name.endsWith('.webm') || 
+                    name.endsWith('.ogg') || name.endsWith('.mov')) {
+                    return 'video';
+                }
+            }
+            
+            // Default to image if we can't determine
+            return 'image';
+        };
+        
+        const mediaType = getMediaType();
+        
+        if (mediaType === 'image') {
+            return (
+                <div className="post-media-item">
+                    <img 
+                        src={mediaUrl} 
+                        alt={media.name || "Post image"} 
+                        className="post-image" 
+                        loading="lazy"
+                        style={{ 
+                            maxWidth: '100%', 
+                            width: '100%',
+                            height: 'auto',
+                            display: 'block', 
+                            margin: '0 auto', 
+                            borderRadius: '8px',
+                            objectFit: 'contain'
+                        }}
+                        onLoad={handleMediaLoad}
+                        onError={handleMediaError}
+                    />
+                    {isLoading && (
+                        <div className="media-loading-overlay">
+                            <div className="spinner"></div>
+                            <p>Loading image... ({gatewayAttempts + 1}/{maxGatewayAttempts})</p>
+                        </div>
+                    )}
+                </div>
+            );
+        } else if (mediaType === 'video') {
+            return (
+                <div className="post-media-item">
+                    <video 
+                        src={mediaUrl} 
+                        controls
+                        className="post-video"
+                        style={{ 
+                            maxWidth: '100%', 
+                            width: '100%',
+                            height: 'auto',
+                            display: 'block', 
+                            margin: '0 auto', 
+                            borderRadius: '8px',
+                            objectFit: 'contain'
+                        }}
+                        onLoadedData={handleMediaLoad}
+                        onError={handleMediaError}
+                    />
+                    {isLoading && (
+                        <div className="media-loading-overlay">
+                            <div className="spinner"></div>
+                            <p>Loading video... ({gatewayAttempts + 1}/{maxGatewayAttempts})</p>
+                        </div>
+                    )}
+                </div>
+            );
+        } else {
+            return (
+                <div className="post-media-item">
+                    <div className="post-file">
+                        <File size={24} />
+                        <span>{media.name || "File"}</span>
+                    </div>
+                </div>
+            );
+        }
+    };
+
     // Add this function to check for notifications
     const checkNotifications = async () => {
         try {
@@ -1508,6 +1739,87 @@ const HomePage = () => {
         }
     };
 
+    const handleFollow = async (user) => {
+        try {
+            const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+            const currentAddress = accounts[0].toLowerCase();
+            
+            // Get current user's username from localStorage
+            const userSession = JSON.parse(localStorage.getItem('userSession') || '{}');
+            const currentUsername = userSession.username;
+            
+            if (!currentUsername) {
+                toast.error("Please log in to follow users");
+                return;
+            }
+            
+            const targetAddress = user.address;
+            
+            // Check if already following
+            const isAlreadyFollowing = await FollowRelationshipContract.methods
+                .isFollowing(currentAddress, targetAddress)
+                .call();
+                
+            if (isAlreadyFollowing) {
+                toast.info(`You are already following ${user.username}`);
+                return;
+            }
+            
+            // Check if there's a pending request
+            const outgoingRequests = JSON.parse(localStorage.getItem('outgoingFollowRequests') || '[]');
+            const hasPendingRequest = outgoingRequests.some(req => 
+                req.from === currentUsername && req.to === user.username
+            );
+            
+            if (hasPendingRequest) {
+                toast.info(`You already have a pending follow request for ${user.username}`);
+                return;
+            }
+            
+            // Send follow request to blockchain
+            await FollowRelationshipContract.methods
+                .sendFollowRequest(targetAddress)
+                .send({ from: currentAddress });
+                
+            // Store follow request in localStorage
+            const newRequest = {
+                from: currentUsername,
+                to: user.username,
+                timestamp: Date.now()
+            };
+            
+            outgoingRequests.push(newRequest);
+            localStorage.setItem('outgoingFollowRequests', JSON.stringify(outgoingRequests));
+            
+            // Create notification for target user
+            const notification = {
+                type: notificationService.notificationTypes.FOLLOW_REQUEST,
+                sourceUser: currentUsername,
+                sourceAddress: currentAddress,
+                content: `${currentUsername} requested to follow you`,
+                timestamp: new Date().toISOString(),
+                read: false
+            };
+            
+            await notificationService.addNotification(targetAddress, notification);
+            
+            // Dispatch event to update notification badge
+            window.dispatchEvent(new CustomEvent('new-notification'));
+            
+            // Update UI
+            toast.success(`Follow request sent to ${user.username}`);
+            
+            // Remove the user from recommended users list
+            setRecommendedUsers(prevUsers => 
+                prevUsers.filter(u => u.username !== user.username)
+            );
+            
+        } catch (error) {
+            console.error("Error following user:", error);
+            toast.error("Failed to follow user. Please try again.");
+        }
+    };
+
     return (
         <div className={`homepage-wrapper ${darkMode ? 'dark-mode' : ''}`}>
             <div className="homepage-container">
@@ -1551,7 +1863,7 @@ const HomePage = () => {
                             </a>
                         </li>
                             <li>
-                                <a href="/profile">
+                                <a href="/profile" className="sidebar-nav-link">
                                     <User size={20} />
                                     <span>Profile</span>
                             </a>
@@ -1750,7 +2062,7 @@ const HomePage = () => {
                                     </div>
                                     <button 
                                         className="follow-button" 
-                                        onClick={() => navigate(`/profile/${user.username}`)}
+                                        onClick={() => handleFollow(user)}
                                     >
                                         Follow
                                     </button>
@@ -1782,7 +2094,7 @@ const HomePage = () => {
                     
                     <div className="footer-branding">
                         <img src={LogoImage} alt="BlockConnect Logo" className="footer-logo"/>
-                        <p>© 2024 BlockConnect</p>
+                        <p> 2024 BlockConnect</p>
                         <p>Decentralized Social Platform</p>
                 </div>
             </aside>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { UserAuthContract, CreatePostContract, FollowRelationshipContract } from "../UserAuth";
+import Web3 from "web3";
 import { format } from 'date-fns';
 import { 
     Heart, 
@@ -24,6 +25,95 @@ import "./UserProfile.css";
 import MessageModal from './MessageModal';
 import { messageService } from '../services/messageService';
 import { getFromIPFS, IPFS_GATEWAY } from '../ipfs';
+import { getIpfsUrl, extractMediaUrls, getWorkingMediaUrl, safelyFetchIpfsJson } from '../utils/ipfsUtils';
+
+// Profile Image component with fallback mechanism
+const ProfileImage = ({ userData, username }) => {
+    const [imageUrl, setImageUrl] = useState(null);
+    const [isLoading, setIsLoading] = useState(true);
+    const [hasError, setHasError] = useState(false);
+    const [gatewayAttempts, setGatewayAttempts] = useState(0);
+    const maxGatewayAttempts = 5;
+
+    useEffect(() => {
+        const loadProfileImage = async () => {
+            if (!userData || !userData.profilePicture) {
+                setIsLoading(false);
+                return;
+            }
+
+            try {
+                const url = getIpfsUrl(userData.profilePicture, gatewayAttempts);
+                console.log(`Attempting to load profile image from gateway ${gatewayAttempts}: ${url}`);
+                setImageUrl(url);
+            } catch (error) {
+                console.error("Error setting up profile image URL:", error);
+                setHasError(true);
+                setIsLoading(false);
+            }
+        };
+
+        loadProfileImage();
+    }, [userData, gatewayAttempts]);
+
+    // Handle successful image load
+    const handleImageLoad = () => {
+        console.log(`Successfully loaded profile image from: ${imageUrl}`);
+        setIsLoading(false);
+    };
+
+    // Handle image load error
+    const handleImageError = () => {
+        console.error(`Failed to load profile image from: ${imageUrl}`);
+        
+        // Try next gateway if available
+        if (gatewayAttempts < maxGatewayAttempts - 1) {
+            console.log(`Trying next gateway (${gatewayAttempts + 1}/${maxGatewayAttempts})`);
+            setGatewayAttempts(prev => prev + 1);
+        } else {
+            console.error("All gateways failed, showing fallback avatar");
+            setHasError(true);
+            setIsLoading(false);
+        }
+    };
+
+    // If user has no profile image or all gateways failed, show initial
+    if (!userData?.profilePicture || hasError) {
+        return (
+            <div className="user-avatar">
+                {username ? username[0].toUpperCase() : "U"}
+            </div>
+        );
+    }
+
+    return (
+        <div className="user-avatar">
+            {isLoading && (
+                <div className="avatar-placeholder">
+                    {username ? username[0].toUpperCase() : "U"}
+                </div>
+            )}
+            <img 
+                src={imageUrl} 
+                alt={`${username}'s profile`} 
+                onLoad={handleImageLoad}
+                onError={handleImageError}
+                style={{ 
+                    display: isLoading ? 'none' : 'block',
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                    borderRadius: '50%'
+                }}
+            />
+            {isLoading && (
+                <div className="avatar-loading-indicator">
+                    <div className="spinner-small"></div>
+                </div>
+            )}
+        </div>
+    );
+};
 
 const UserProfile = () => {
     const { username } = useParams();
@@ -87,12 +177,12 @@ const UserProfile = () => {
             setLoading(true);
             setError(null);
 
-            // Get user's blockchain address by username
+            // Get user address from username
             const userAddress = await UserAuthContract.methods
                 .getAddressByUsername(username)
                 .call();
 
-            if (!userAddress) {
+            if (!userAddress || userAddress === '0x0000000000000000000000000000000000000000') {
                 throw new Error("User not found");
             }
 
@@ -103,49 +193,35 @@ const UserProfile = () => {
             
             // Check if currently following this user using blockchain
             try {
+                // Get current user's username
+                const currentUserUsername = await UserAuthContract.methods
+                    .getUsernameByAddress(accounts[0])
+                    .call();
+                
                 const isFollowingOnChain = await FollowRelationshipContract.methods
                     .isFollowing(accounts[0], userAddress)
                     .call();
                 
-                if (isFollowingOnChain) {
-                    setFollowStatus('following');
-                } else {
-                    // Check if there's a pending request
-                    const pendingRequests = await FollowRelationshipContract.methods
-                        .getPendingRequests(userAddress)
-                        .call();
-                        
-                    const hasPendingRequest = pendingRequests.some(req => 
-                        req.from === accounts[0] && !req.accepted
-                    );
-                        
-                    if (hasPendingRequest) {
-                        setFollowStatus('requested');
-                    } else {
-                        setFollowStatus('none');
-                    }
-                }
-            } catch (error) {
-                console.error("Error checking follow status on blockchain:", error);
-                
-                // Fallback to localStorage
-                const currentUserData = JSON.parse(localStorage.getItem("userData"));
-                if (!currentUserData) return;
-                
-                const followedUsers = JSON.parse(localStorage.getItem('followedUsers') || '[]');
-                
-                if (followedUsers.includes(username)) {
-                    setFollowStatus('following');
-                } else {
-                    const pendingOutgoingRequests = JSON.parse(localStorage.getItem('outgoingFollowRequests') || '[]');
+                setFollowStatus(isFollowingOnChain ? 'following' : 'none');
+
+                // If not following, check if there's a pending request
+                if (!isFollowingOnChain && currentUserUsername) {
+                    // Get current user data to check pending requests
+                    const currentUserData = JSON.parse(localStorage.getItem(`user_${currentUserUsername}`)) || {};
+                    const pendingOutgoingRequests = currentUserData.pendingOutgoingRequests || [];
+                    
                     const hasPendingRequest = pendingOutgoingRequests.some(req => 
-                        req.from === currentUserData.username && req.to === username
+                        req.from === currentUserUsername && req.to === username
                     );
                         
                     setFollowStatus(hasPendingRequest ? 'requested' : 'none');
                 }
+            } catch (error) {
+                console.error("Error checking follow status:", error);
+                // Default to not following if there's an error
+                setFollowStatus('none');
             }
-            
+
             // Get user's IPFS hashes
             const ipfsHashes = await UserAuthContract.methods
                 .getUserHashes(userAddress)
@@ -157,54 +233,100 @@ const UserProfile = () => {
 
             // Use the latest IPFS hash (most recent user data)
             const latestHash = ipfsHashes[ipfsHashes.length - 1];
-
-            // Fetch user data from IPFS
-            const response = await fetch(`${IPFS_GATEWAY}/${latestHash}`);
-            if (!response.ok) {
-                throw new Error("Failed to fetch user data from IPFS");
+            
+            // Create a cache key for this profile
+            const cacheKey = `profile_${username}_${latestHash}`;
+            
+            // Show loading state
+            setProfileData({
+                username: username,
+                bio: "Loading profile information...",
+                location: "Unknown",
+                website: "",
+                joinDate: new Date().toLocaleDateString(),
+                profilePicture: null,
+                address: userAddress
+            });
+            
+            // Try to fetch the profile data using our safe utility
+            const userData = await safelyFetchIpfsJson(latestHash, cacheKey);
+            
+            if (userData) {
+                // Process the fetched profile data
+                await processProfileData(userData, userAddress);
+            } else {
+                // If we couldn't fetch the data, show an error
+                setError("Could not load complete profile data. Using limited information.");
+                setLoading(false);
+            }
+            
+        } catch (error) {
+            console.error("Error fetching user profile:", error);
+            setError(error.message || "Failed to load profile");
+            setLoading(false);
+        }
+    };
+    
+    // Function to handle errors
+    const handleProfileError = (error) => {
+        console.error("Error fetching user profile:", error);
+        setError(error.message || "Failed to load profile");
+        setLoading(false);
+    };
+    
+    // Process profile data and update state
+    const processProfileData = async (userData, userAddress) => {
+        try {
+            // Check if profile visibility is turned off
+            if (userData.privacySettings && userData.privacySettings.profileVisibility === false) {
+                // Get current user's address
+                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                const currentUserAddress = accounts[0];
+                
+                // Check if current user is the profile owner
+                if (currentUserAddress.toLowerCase() !== userAddress.toLowerCase()) {
+                    // Check if current user is in the allowed list
+                    const allowedUsers = userData.privacySettings.allowedUsers || [];
+                    const currentUserUsername = await UserAuthContract.methods
+                        .getUsernameByAddress(currentUserAddress)
+                        .call();
+                        
+                    if (!allowedUsers.includes(currentUserUsername)) {
+                        setError("This profile is private");
+                        setLoading(false);
+                        return;
+                    }
+                }
             }
 
-            const userData = await response.json();
-            
             // Fetch user posts
             await fetchUserPosts(userAddress);
             
-            // Get follower and following counts from localStorage
-            const followersList = JSON.parse(localStorage.getItem(`followers_${username}`) || '[]');
-            const followingList = JSON.parse(localStorage.getItem(`following_${username}`) || '[]');
-            
-            // Also check followedUsers for backward compatibility
-            const followedUsers = JSON.parse(localStorage.getItem('followedUsers') || '[]');
-            
-            // If they've been using the old system, count this way
-            let followingCount = 0;
-            if (followingList.length === 0 && followedUsers.includes(username)) {
-                followingCount = 1; // At least you are following them
-            } else {
-                followingCount = followingList.length;
-            }
-            
-            // Set follower count
-            let followersCount = followersList.length;
-            
-            // Get registration timestamp from blockchain (if available)
-            let joinedDate = "April 2023"; // Default fallback
+            // Get followers and following count
+            const followersCount = await FollowRelationshipContract.methods
+                .getFollowersCount(userAddress)
+                .call();
+
+            const followingCount = await FollowRelationshipContract.methods
+                .getFollowingCount(userAddress)
+                .call();
+
+            // Get user's join date if not already in profile data
+            let joinedDate = "";
             try {
-                // Try to get the registration timestamp from the user's first hash
-                if (ipfsHashes.length > 0) {
-                    const firstHash = ipfsHashes[0];
-                    const firstDataResponse = await fetch(`${IPFS_GATEWAY}/${firstHash}`);
+                if (!userData.registrationTime) {
+                    const registrationBlock = await UserAuthContract.methods
+                        .getUserRegistrationBlock(userAddress)
+                        .call();
                     
-                    if (firstDataResponse.ok) {
-                        const firstData = await firstDataResponse.json();
-                        
-                        // If the firstData has a registrationTime, use it
-                        if (firstData.registrationTime) {
-                            joinedDate = new Date(firstData.registrationTime).toLocaleDateString('en-US', {
-                                month: 'long',
-                                year: 'numeric'
-                            });
-                        }
+                    if (registrationBlock > 0) {
+                        // Initialize web3 instance
+                        const web3Instance = new Web3(Web3.givenProvider || "http://localhost:7545");
+                        const block = await web3Instance.eth.getBlock(registrationBlock);
+                        joinedDate = new Date(block.timestamp * 1000).toLocaleDateString('en-US', {
+                            month: 'long',
+                            year: 'numeric'
+                        });
                     }
                 }
             } catch (err) {
@@ -227,6 +349,8 @@ const UserProfile = () => {
                 followers: followersCount,
                 following: followingCount
             });
+            
+            setLoading(false);
 
         } catch (error) {
             console.error("Error fetching user profile:", error);
@@ -255,13 +379,24 @@ const UserProfile = () => {
                         .getPost(postId)
                         .call();
 
-                    // Fetch post content from IPFS
-                    const response = await fetch(`${IPFS_GATEWAY}/${post.contentHash}`);
-                    if (!response.ok) {
-                        throw new Error(`Failed to fetch post ${postId} content from IPFS`);
+                    // Create a cache key for this post
+                    const cacheKey = `post_${postId}_${post.contentHash}`;
+                    
+                    // Fetch post content using our safe utility
+                    const postData = await safelyFetchIpfsJson(post.contentHash, cacheKey);
+                    
+                    if (!postData) {
+                        console.error(`Failed to fetch post ${postId} from all IPFS gateways`);
+                        // Return minimal post data if we couldn't fetch the content
+                        return {
+                            id: post.postId,
+                            timestamp: new Date(Number(post.timestamp) * 1000),
+                            content: "Content unavailable",
+                            likes: 0,
+                            comments: 0
+                        };
                     }
 
-                    const postData = await response.json();
                     return {
                         id: post.postId,
                         timestamp: new Date(Number(post.timestamp) * 1000),
@@ -411,9 +546,7 @@ const UserProfile = () => {
                 {/* Profile info section */}
                 <div className="user-profile-info">
                     <div className="user-avatar-section">
-                        <div className="user-avatar">
-                            {username[0].toUpperCase()}
-                        </div>
+                        <ProfileImage userData={profileData} username={username} />
                     </div>
 
                     <div className="user-profile-actions">

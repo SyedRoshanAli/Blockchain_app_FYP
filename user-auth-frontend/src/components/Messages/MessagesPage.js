@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { messageService } from '../../services/messageService';
+import messageService from '../../services/messageService';
 import { UserAuthContract } from "../../UserAuth";
 import { Search, ArrowLeft, Send, Paperclip, Smile, Image, MessageSquare, Trash2, RefreshCw } from 'lucide-react';
 import { format } from 'date-fns';
@@ -23,753 +23,399 @@ const MessagesPage = () => {
   const userParam = searchParams.get('user');
 
   useEffect(() => {
-    // Get current user's data
-    const userData = JSON.parse(localStorage.getItem('userData') || '{}');
-    setCurrentUser(userData);
-    
-    // Set up blockchain account
-    const setupAccount = async () => {
+    const fetchCurrentUser = async () => {
       try {
-        await window.ethereum.request({ method: "eth_requestAccounts" });
+        const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+        const userAddress = accounts[0].toLowerCase();
+        const userSession = JSON.parse(localStorage.getItem('userSession') || '{}');
         
-        // Fetch conversations first
-        await fetchConversations();
-        
-        // Sync all messages after conversations are loaded
-        await syncMessagesOnLoad();
-        
-        // If a user parameter is provided in the URL, start a conversation with that user
-        if (userParam) {
-          await startConversationWithUser(userParam);
-        }
-      } catch (error) {
-        console.error("Error setting up account:", error);
-        toast.error("Failed to connect to blockchain. Please make sure MetaMask is connected.");
-      }
-    };
-    
-    setupAccount();
-    
-    // Set up event listener for new messages
-    const setupMessageListener = async () => {
-      try {
-        messageService.onNewMessage((newMsg) => {
-          // Update conversations and message list if needed
-          fetchConversations();
-          if (activeChat && (newMsg.sender === activeChat.address || newMsg.recipient === activeChat.address)) {
-            fetchMessages(activeChat);
-          }
+        setCurrentUser({
+          walletAddress: userAddress,
+          username: userSession.username || 'User'
         });
       } catch (error) {
-        console.error("Error setting up message listener:", error);
+        console.error('Error fetching current user:', error);
       }
     };
-    
-    setupMessageListener();
-    
-    // Cleanup
-    return () => {
-      // Any cleanup needed for event listeners
-    };
-  }, [userParam]); // Only re-run when userParam changes
 
-  // Add this useEffect to update when activeChat changes
+    const fetchConversations = async () => {
+      try {
+        setLoading(true);
+        const conversationsList = await messageService.getConversations();
+        setConversations(conversationsList);
+      } catch (error) {
+        console.error('Error fetching conversations:', error);
+        toast.error('Failed to load conversations');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchCurrentUser();
+    fetchConversations();
+
+    // Check if we're coming from a profile page with a message action
+    if (location.state && location.state.messageUser) {
+      const { address, username } = location.state.messageUser;
+      setActiveChat({ address, username });
+    }
+
+    // Set up interval to refresh conversations
+    const intervalId = setInterval(fetchConversations, 30000); // Every 30 seconds
+
+    return () => {
+      clearInterval(intervalId);
+    };
+  }, [location.state]);
+
   useEffect(() => {
     if (activeChat) {
       fetchMessages(activeChat);
+      
+      // Mark messages as read when chat is opened
+      const conversationId = messageService.getConversationId(
+        currentUser?.walletAddress || '', 
+        activeChat.address
+      );
+      messageService.markMessagesAsRead(conversationId);
+      
+      // Set up message listener for this conversation
+      const unsubscribe = messageService.addMessageListener(conversationId, (updatedMessages) => {
+        setMessages(updatedMessages);
+      });
+      
+      return () => {
+        unsubscribe();
+      };
     }
-  }, [activeChat]);
+  }, [activeChat, currentUser]);
 
+  // Reference to auto-scroll to bottom of messages
+  const messagesEndRef = React.useRef(null);
+  
   useEffect(() => {
-    // Check if there's a stored active chat
-    const lastActiveChat = localStorage.getItem('last_active_chat');
-    if (lastActiveChat) {
-      try {
-        const parsedChat = JSON.parse(lastActiveChat);
-        if (parsedChat) {
-          setActiveChat(parsedChat);
-        }
-      } catch (error) {
-        console.error("Error parsing last active chat:", error);
-      }
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollTop = messagesEndRef.current.scrollHeight;
     }
-  }, []);
-
-  const fetchConversations = async () => {
-    try {
-      setLoading(true);
-      const allMessages = await messageService.getAllMessages();
-      
-      // Group messages by sender/recipient to create conversations
-      const conversationMap = new Map();
-      
-      for (const msg of allMessages) {
-        const otherParty = msg.sender === window.ethereum.selectedAddress ? msg.recipient : msg.sender;
-        
-        if (!conversationMap.has(otherParty)) {
-          // Get username for this address
-          const usernames = await UserAuthContract.methods
-            .getUsernames(otherParty)
-            .call();
-            
-          const username = usernames[0] || 'Unknown User';
-          
-          // Count unread messages for this conversation
-          const unreadCount = allMessages.filter(m => 
-            m.sender === otherParty && 
-            !m.isRead && 
-            m.recipient === window.ethereum.selectedAddress
-          ).length;
-          
-          conversationMap.set(otherParty, {
-            address: otherParty,
-            username: username,
-            lastMessage: msg.content,
-            timestamp: Number(msg.timestamp) * 1000,
-            unread: unreadCount
-          });
-        } else {
-          const existing = conversationMap.get(otherParty);
-          if (Number(msg.timestamp) * 1000 > existing.timestamp) {
-            existing.lastMessage = msg.content;
-            existing.timestamp = Number(msg.timestamp) * 1000;
-          }
-        }
-      }
-      
-      // Convert map to array and sort by timestamp (most recent first)
-      const conversationList = Array.from(conversationMap.values());
-      conversationList.sort((a, b) => b.timestamp - a.timestamp);
-      
-      setConversations(conversationList);
-    } catch (error) {
-      console.error("Error fetching conversations:", error);
-      toast.error("Failed to load conversations");
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [messages]);
 
   const fetchMessages = async (conversation) => {
     try {
-      console.log("Fetching messages for:", conversation.username);
-      setLoading(true);
+      if (!currentUser?.walletAddress) return;
       
-      // Get the current user's address
-      const accounts = await window.ethereum.request({
-        method: "eth_requestAccounts"
-      });
-      const myAddress = accounts[0].toLowerCase();
+      const conversationId = messageService.getConversationId(
+        currentUser.walletAddress, 
+        conversation.address
+      );
       
-      // Create a storage key for this conversation
-      const storageKey = `${LOCAL_STORAGE_KEY_PREFIX}${myAddress}_${conversation.address.toLowerCase()}`;
+      const messagesList = await messageService.getMessages(conversationId);
+      setMessages(messagesList);
       
-      // First load any messages we have in localStorage
-      const storedMessages = JSON.parse(localStorage.getItem(storageKey) || '[]');
-      console.log("Messages from localStorage:", storedMessages);
-      
-      // Try to fetch from blockchain and merge with localStorage
-      try {
-        // Fetch messages from blockchain
-        const blockchainMessages = await messageService.getMessagesWith(conversation.address);
-        console.log("Blockchain messages:", blockchainMessages);
-        
-        // Format blockchain messages
-        const formattedBlockchainMessages = blockchainMessages.map(msg => ({
-          id: msg.id,
-          content: msg.content,
-          sender: msg.sender,
-          recipient: msg.recipient,
-          timestamp: Number(msg.timestamp) * 1000,
-          isRead: msg.isRead,
-          isMine: msg.sender.toLowerCase() === myAddress,
-          fromBlockchain: true
-        }));
-        
-        // Get IDs of messages from blockchain to avoid duplicates
-        const blockchainMessageIds = formattedBlockchainMessages.map(msg => msg.id);
-        
-        // Keep localStorage messages that aren't from blockchain (pending/failed)
-        // or aren't duplicated in blockchain messages
-        const localOnlyMessages = storedMessages.filter(msg => 
-          !msg.fromBlockchain || !blockchainMessageIds.includes(msg.id)
-        );
-        
-        // Combine blockchain messages with localStorage-only messages
-        const combinedMessages = [...formattedBlockchainMessages, ...localOnlyMessages];
-        
-        // Sort by timestamp
-        combinedMessages.sort((a, b) => a.timestamp - b.timestamp);
-        
-        // Save the combined set to localStorage
-        localStorage.setItem(storageKey, JSON.stringify(combinedMessages));
-        console.log("Saved combined messages to localStorage:", combinedMessages);
-        
-        // Save to state
-        setMessages(combinedMessages);
-        
-        // Mark unread messages as read
-        const unreadMessages = combinedMessages.filter(msg => 
-          !msg.isRead && 
-          msg.sender.toLowerCase() !== myAddress && 
-          msg.fromBlockchain // Only mark blockchain messages as read
-        );
-        
-        for (const msg of unreadMessages) {
-          await messageService.markAsRead(msg.id);
-        }
-        
-        // Update conversations list if there were unread messages
-        if (unreadMessages.length > 0) {
-          fetchConversations();
-        }
-        
-      } catch (error) {
-        console.error("Error fetching from blockchain, using localStorage only:", error);
-        
-        // If blockchain fetch fails, just use localStorage
-        setMessages(storedMessages);
-        console.log("Using stored messages only:", storedMessages);
-      }
+      // Mark messages as read
+      await messageService.markMessagesAsRead(conversationId);
     } catch (error) {
-      console.error("Error in fetch messages:", error);
-      toast.error("Failed to load messages");
-    } finally {
-      setLoading(false);
+      console.error('Error fetching messages:', error);
+      toast.error('Failed to load messages');
     }
   };
 
-  const handleSendMessage = async (e) => {
-    e.preventDefault();
-    if (!newMessage.trim() || !activeChat) return;
-    
-    const messageContent = newMessage.trim();
-    const tempId = `temp-${Date.now()}`;
+  const handleSendMessage = async () => {
+    if (!newMessage.trim() || !activeChat || !currentUser?.walletAddress) return;
     
     try {
-      // Get my address
-      const accounts = await window.ethereum.request({
-        method: "eth_requestAccounts"
-      });
-      const myAddress = accounts[0];
-      
-      // Create a temporary message to show immediately
-      const tempMessage = {
-        id: tempId,
-        content: messageContent,
-        sender: myAddress,
-        recipient: activeChat.address,
-        timestamp: Date.now(),
-        isRead: true,
-        isMine: true,
-        isPending: true
-      };
-      
-      // Add message to UI immediately
-      setMessages(prevMessages => [...prevMessages, tempMessage]);
-      
-      // Clear input
+      await messageService.sendMessage(activeChat.address, newMessage.trim());
       setNewMessage('');
-      
-      // Save to localStorage immediately with consistent key format
-      const storageKey = `${LOCAL_STORAGE_KEY_PREFIX}${myAddress.toLowerCase()}_${activeChat.address.toLowerCase()}`;
-      let storedMessages = JSON.parse(localStorage.getItem(storageKey) || '[]');
-      storedMessages = [...storedMessages, tempMessage];
-      localStorage.setItem(storageKey, JSON.stringify(storedMessages));
-      
-      console.log("Saved pending message to localStorage:", tempMessage);
-      console.log("Current messages in localStorage:", storedMessages);
-      
-      console.log("Sending message to blockchain...");
-      
-      // Send actual message to blockchain
-      const result = await messageService.sendMessage(activeChat.address, messageContent);
-      console.log("Message sent successfully:", result);
-      
-      // Get the real message ID from the transaction result
-      const realMessageId = result.events?.MessageSent?.returnValues?.id || tempId;
-      
-      console.log("Real message ID:", realMessageId);
-      
-      // Update the temporary message with the real message ID
-      const updatedMessage = {
-        ...tempMessage,
-        id: realMessageId,
-        isPending: false,
-        fromBlockchain: true
-      };
-      
-      // Update messages state
-      setMessages(prevMessages => 
-        prevMessages.map(msg => 
-          msg.id === tempId ? updatedMessage : msg
-        )
-      );
-      
-      // Update in localStorage too - making sure to load the latest state first
-      storedMessages = JSON.parse(localStorage.getItem(storageKey) || '[]');
-      const updatedStoredMessages = storedMessages.map(msg => 
-        msg.id === tempId ? updatedMessage : msg
-      );
-      localStorage.setItem(storageKey, JSON.stringify(updatedStoredMessages));
-      
-      console.log("Updated message in localStorage:", updatedMessage);
-      console.log("Current messages in localStorage after update:", updatedStoredMessages);
-      
-      // Refresh conversation list
-      fetchConversations();
-      
     } catch (error) {
-      console.error("Error sending message:", error);
-      
-      try {
-        // Get accounts inside catch block too
-        const accounts = await window.ethereum.request({
-          method: "eth_requestAccounts"
-        });
-        const myAddress = accounts[0];
-        
-        // Mark the message as failed in UI but keep it visible
-        setMessages(prevMessages => 
-          prevMessages.map(msg => 
-            msg.id === tempId 
-              ? { ...msg, isPending: false, isFailed: true } 
-              : msg
-          )
-        );
-        
-        // Update in localStorage too - making sure to load the latest state first
-        const storageKey = `${LOCAL_STORAGE_KEY_PREFIX}${myAddress.toLowerCase()}_${activeChat.address.toLowerCase()}`;
-        const storedMessages = JSON.parse(localStorage.getItem(storageKey) || '[]');
-        const updatedMessages = storedMessages.map(msg => 
-          msg.id === tempId ? { ...msg, isPending: false, isFailed: true } : msg
-        );
-        localStorage.setItem(storageKey, JSON.stringify(updatedMessages));
-        
-      } catch (nestedError) {
-        console.error("Error handling failed message:", nestedError);
-      }
-      
-      toast.error("Failed to send message. You can retry.");
+      console.error('Error sending message:', error);
+      toast.error('Failed to send message');
     }
   };
 
-  const formatTime = (timestamp) => {
-    const date = new Date(timestamp);
+  const handleDeleteMessage = async (messageId) => {
+    try {
+      if (!currentUser?.walletAddress || !activeChat) return;
+      
+      const conversationId = messageService.getConversationId(
+        currentUser.walletAddress, 
+        activeChat.address
+      );
+      
+      await messageService.deleteMessage(conversationId, messageId);
+      toast.success('Message deleted');
+    } catch (error) {
+      console.error('Error deleting message:', error);
+      toast.error('Failed to delete message');
+    }
+  };
+
+  const handleDeleteConversation = async (conversation) => {
+    try {
+      if (!currentUser?.walletAddress) return;
+      
+      const conversationId = messageService.getConversationId(
+        currentUser.walletAddress, 
+        conversation.address
+      );
+      
+      await messageService.deleteConversation(conversationId);
+      setActiveChat(null);
+      
+      // Refresh conversations
+      const conversationsList = await messageService.getConversations();
+      setConversations(conversationsList);
+      
+      toast.success('Conversation deleted');
+    } catch (error) {
+      console.error('Error deleting conversation:', error);
+      toast.error('Failed to delete conversation');
+    }
+  };
+
+  const formatMessageTime = (timestamp) => {
+    if (!timestamp) return '';
+    
+    const messageDate = new Date(timestamp);
     const now = new Date();
     
-    // If same day, show time
-    if (date.toDateString() === now.toDateString()) {
-      return format(date, 'h:mm a');
+    // If today, show time
+    if (messageDate.toDateString() === now.toDateString()) {
+      return format(messageDate, 'h:mm a');
     }
     
-    // If within last week, show day
-    const weekAgo = new Date();
-    weekAgo.setDate(weekAgo.getDate() - 7);
-    if (date > weekAgo) {
-      return format(date, 'EEEE');
+    // If this week, show day
+    const diffInDays = Math.floor((now - messageDate) / (1000 * 60 * 60 * 24));
+    if (diffInDays < 7) {
+      return format(messageDate, 'EEE');
     }
     
     // Otherwise show date
-    return format(date, 'MMM d');
+    return format(messageDate, 'MM/dd/yy');
   };
 
-  const filteredConversations = conversations.filter(
-    convo => convo.username.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  // Add a function to start a conversation with a specific user
-  const startConversationWithUser = async (username) => {
-    try {
-      // Get the Ethereum address for this username
-      const address = await UserAuthContract.methods
-        .getAddressByUsername(username)
-        .call();
-      
-      if (!address || address === '0x0000000000000000000000000000000000000000') {
-        toast.error("User not found");
-        return;
-      }
-      
-      // Check if we already have a conversation with this user
-      const existingConversation = conversations.find(
-        conv => conv.address.toLowerCase() === address.toLowerCase()
-      );
-      
-      if (existingConversation) {
-        // If conversation exists, set it as active
-        setActiveChat(existingConversation);
-      } else {
-        // Create a new conversation object
-        const newConversation = {
-          address: address,
-          username: username,
-          lastMessage: "Start a conversation",
-          timestamp: Date.now(),
-          unread: 0
-        };
-        
-        // Add to conversations list
-        setConversations(prev => [newConversation, ...prev]);
-        
-        // Set as active chat
-        setActiveChat(newConversation);
-      }
-    } catch (error) {
-      console.error("Error starting conversation:", error);
-      toast.error("Could not start conversation with this user");
+  const formatMessageDate = (timestamp) => {
+    if (!timestamp) return '';
+    
+    const messageDate = new Date(timestamp);
+    const now = new Date();
+    
+    // If today
+    if (messageDate.toDateString() === now.toDateString()) {
+      return 'Today';
     }
-  };
-
-  // Add this function to handle message deletion
-  const handleDeleteMessage = async (messageId) => {
-    try {
-      // Add confirmation dialog
-      if (!window.confirm("Are you sure you want to delete this message?")) {
-        return;
-      }
-      
-      // Call the delete message function from messageService
-      await messageService.deleteMessage(messageId);
-      
-      // Update the UI by removing the deleted message
-      setMessages(messages.filter(msg => msg.id !== messageId));
-      
-      toast.success("Message deleted successfully");
-      
-      // Refresh conversations
-      fetchConversations();
-    } catch (error) {
-      console.error("Error deleting message:", error);
-      toast.error("Failed to delete message");
+    
+    // If yesterday
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    if (messageDate.toDateString() === yesterday.toDateString()) {
+      return 'Yesterday';
     }
-  };
-
-  const handleRetryMessage = async (content, failedId) => {
-    try {
-      // Remove the failed message
-      setMessages(prevMessages => prevMessages.filter(msg => msg.id !== failedId));
-      
-      // Now resend it as a new message
-      const tempId = `temp-${Date.now()}`;
-      
-      // Create a new temporary message
-      const tempMessage = {
-        id: tempId,
-        content: content,
-        sender: window.ethereum.selectedAddress,
-        recipient: activeChat.address,
-        timestamp: Date.now(),
-        isRead: true,
-        isMine: true,
-        isPending: true
-      };
-      
-      // Add message to UI immediately
-      setMessages(prevMessages => [...prevMessages, tempMessage]);
-      
-      // Send actual message to blockchain
-      const result = await messageService.sendMessage(activeChat.address, content);
-      
-      // Update the temporary message with the real message ID
-      setMessages(prevMessages => 
-        prevMessages.map(msg => 
-          msg.id === tempId 
-            ? { ...msg, id: result.events?.MessageSent?.returnValues?.id || msg.id, isPending: false } 
-            : msg
-        )
-      );
-      
-      // Refresh conversation list
-      fetchConversations();
-      
-    } catch (error) {
-      console.error("Error retrying message:", error);
-      toast.error("Failed to retry sending message");
+    
+    // If this week
+    const diffInDays = Math.floor((now - messageDate) / (1000 * 60 * 60 * 24));
+    if (diffInDays < 7) {
+      return format(messageDate, 'EEEE');
     }
-  };
-
-  // Add this function to sync all conversations on page load
-  const syncAllConversations = async () => {
-    try {
-      // Get all messages
-      const allMessages = await messageService.getAllMessages();
-      
-      // Group by conversation partner
-      const messagesByPartner = {};
-      
-      for (const msg of allMessages) {
-        const myAddress = window.ethereum.selectedAddress.toLowerCase();
-        const partner = msg.sender.toLowerCase() === myAddress 
-          ? msg.recipient.toLowerCase() 
-          : msg.sender.toLowerCase();
-        
-        if (!messagesByPartner[partner]) {
-          messagesByPartner[partner] = [];
-        }
-        
-        messagesByPartner[partner].push({
-          id: msg.id,
-          content: msg.content,
-          sender: msg.sender,
-          recipient: msg.recipient,
-          timestamp: Number(msg.timestamp) * 1000,
-          isRead: msg.isRead,
-          isMine: msg.sender.toLowerCase() === myAddress,
-          fromBlockchain: true
-        });
-      }
-      
-      // Save each conversation to localStorage
-      for (const partner in messagesByPartner) {
-        const storageKey = `chat_${window.ethereum.selectedAddress.toLowerCase()}_${partner}`;
-        const storedMessages = JSON.parse(localStorage.getItem(storageKey) || '[]');
-        
-        // Existing blockchain messages
-        const existingBlockchainIds = storedMessages
-          .filter(m => m.fromBlockchain)
-          .map(m => m.id);
-        
-        // Local-only messages (pending or failed)
-        const localMessages = storedMessages.filter(m => !m.fromBlockchain);
-        
-        // New blockchain messages
-        const newBlockchainMessages = messagesByPartner[partner]
-          .filter(m => !existingBlockchainIds.includes(m.id));
-        
-        // Combine all messages
-        const allMessages = [...storedMessages.filter(m => m.fromBlockchain), ...newBlockchainMessages, ...localMessages];
-        
-        // Save back to localStorage
-        localStorage.setItem(storageKey, JSON.stringify(allMessages));
-      }
-      
-      console.log("All conversations synced with blockchain");
-    } catch (error) {
-      console.error("Error syncing conversations:", error);
-    }
-  };
-
-  // Add this function to sync messages on load
-  const syncMessagesOnLoad = async () => {
-    try {
-      console.log("Syncing all messages...");
-      // Get accounts
-      const accounts = await window.ethereum.request({
-        method: "eth_requestAccounts"
-      });
-      const myAddress = accounts[0].toLowerCase();
-
-      // Get all messages
-      const allMessages = await messageService.getAllMessages();
-      
-      // Group messages by conversation partner
-      for (const conversation of conversations) {
-        const otherAddress = conversation.address.toLowerCase();
-        
-        // Filter messages for this conversation
-        const conversationMessages = allMessages.filter(msg => 
-          (msg.sender.toLowerCase() === myAddress && msg.recipient.toLowerCase() === otherAddress) ||
-          (msg.sender.toLowerCase() === otherAddress && msg.recipient.toLowerCase() === myAddress)
-        );
-        
-        // Format the messages
-        const formattedMessages = conversationMessages.map(msg => ({
-          id: msg.id,
-          content: msg.content,
-          sender: msg.sender,
-          recipient: msg.recipient,
-          timestamp: Number(msg.timestamp) * 1000,
-          isRead: msg.isRead,
-          isMine: msg.sender.toLowerCase() === myAddress,
-          fromBlockchain: true
-        }));
-        
-        // Save to localStorage
-        const storageKey = `${LOCAL_STORAGE_KEY_PREFIX}${myAddress}_${otherAddress}`;
-        localStorage.setItem(storageKey, JSON.stringify(formattedMessages));
-        
-        console.log(`Synced ${formattedMessages.length} messages for conversation with ${conversation.username}`);
-      }
-      
-      // If we have an active chat, reload its messages
-      if (activeChat) {
-        fetchMessages(activeChat);
-      }
-      
-      console.log("All messages synced");
-    } catch (error) {
-      console.error("Error syncing messages:", error);
-    }
+    
+    // Otherwise show full date
+    return format(messageDate, 'MMMM d, yyyy');
   };
 
   return (
-    <div className="messages-page">
-      <div className="messages-container">
-        <div className="conversations-sidebar">
-          <div className="conversations-header">
-            <h2>Messages</h2>
-            <div className="search-container">
-              <Search size={18} />
-              <input 
-                type="text" 
-                placeholder="Search messages" 
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
+    <div className="messages-container">
+      <div className="messages-sidebar">
+        <div className="messages-header">
+          <div className="current-user">
+            <div className="user-avatar">
+              {currentUser?.username?.[0]?.toUpperCase() || 'U'}
             </div>
+            <h3>{currentUser?.username || 'User'}</h3>
           </div>
-          
-          <div className="conversations-list">
-            {loading ? (
-              <div className="loading-spinner">
-                <div className="spinner"></div>
-                <p>Loading conversations...</p>
-              </div>
-            ) : filteredConversations.length === 0 ? (
-              <div className="no-conversations">
-                <p>No conversations yet</p>
-              </div>
-            ) : (
-              filteredConversations.map(conversation => (
+          <button className="new-message-btn" onClick={() => navigate('/search?action=message')}>
+            <MessageSquare size={20} />
+          </button>
+        </div>
+        
+        <div className="search-container">
+          <div className="search-input-container">
+            <Search size={16} className="search-icon" />
+            <input 
+              type="text" 
+              placeholder="Search messages" 
+              value={searchQuery} 
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="search-input"
+            />
+          </div>
+        </div>
+        
+        <div className="conversations-list">
+          {loading ? (
+            <div className="loading-spinner">
+              <div className="spinner"></div>
+              <p>Loading conversations...</p>
+            </div>
+          ) : conversations.length === 0 ? (
+            <div className="no-conversations">
+              <MessageSquare size={40} />
+              <p>No conversations yet</p>
+              <button 
+                className="start-conversation-btn"
+                onClick={() => navigate('/search?action=message')}
+              >
+                Start a conversation
+              </button>
+            </div>
+          ) : (
+            conversations
+              .filter(convo => 
+                convo.username.toLowerCase().includes(searchQuery.toLowerCase())
+              )
+              .map(conversation => (
                 <div 
-                  key={conversation.address}
-                  className={`conversation-item ${activeChat?.address === conversation.address ? 'active' : ''} ${conversation.unread ? 'unread' : ''}`}
-                  onClick={() => {
-                    setActiveChat(conversation);
-                    // Save active chat to localStorage
-                    localStorage.setItem('last_active_chat', JSON.stringify(conversation));
-                    fetchMessages(conversation);
-                  }}
+                  key={conversation.address} 
+                  className={`conversation-item ${activeChat?.address === conversation.address ? 'active' : ''}`}
+                  onClick={() => setActiveChat(conversation)}
                 >
                   <div className="conversation-avatar">
                     {conversation.username[0].toUpperCase()}
+                    {conversation.unreadCount > 0 && (
+                      <span className="unread-badge">{conversation.unreadCount}</span>
+                    )}
                   </div>
                   <div className="conversation-info">
                     <div className="conversation-header">
                       <h4>{conversation.username}</h4>
-                      <span className="conversation-time">
-                        {formatTime(conversation.timestamp)}
+                      <span className="last-message-time">
+                        {formatMessageTime(conversation.lastMessageTime)}
                       </span>
                     </div>
-                    <p className="conversation-preview">{conversation.lastMessage}</p>
+                    <p className="last-message-preview">
+                      {conversation.lastMessage && conversation.lastMessage.length > 30
+                        ? conversation.lastMessage.substring(0, 30) + '...'
+                        : conversation.lastMessage || 'No messages yet'}
+                    </p>
                   </div>
-                  {conversation.unread > 0 && (
-                    <div className="unread-badge">{conversation.unread}</div>
-                  )}
                 </div>
               ))
-            )}
-          </div>
-        </div>
-        
-        <div className="chat-container">
-          {!activeChat ? (
-            <div className="no-chat-selected">
-              <div className="no-chat-icon">
-                <MessageSquare size={48} />
-              </div>
-              <h3>Your Messages</h3>
-              <p>Send private messages to a friend or group</p>
-            </div>
-          ) : (
-            <>
-              <div className="chat-header">
-                <button className="back-button" onClick={() => setActiveChat(null)}>
-                  <ArrowLeft size={20} />
-                </button>
-                <div 
-                  className="chat-user-info"
-                  onClick={() => navigate(`/profile/${activeChat.username}`)}
-                >
-                  <div className="chat-avatar">
-                    {activeChat.username[0].toUpperCase()}
-                  </div>
-                  <div>
-                    <h4>{activeChat.username}</h4>
-                    <span className="user-status">Active now</span>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="messages-list">
-                {/* Show date divider only if we have messages */}
-                {messages.length > 0 && (
-                  <div className="chat-date-divider">
-                    <span>Messages</span>
-                  </div>
-                )}
-                
-                {messages.map((message, index) => (
-                  <div 
-                    key={message.id || index}
-                    className={`message-bubble ${message.isMine ? 'sent' : 'received'} ${message.isPending ? 'pending' : ''} ${message.isFailed ? 'failed' : ''}`}
-                  >
-                    <p>{message.content}</p>
-                    <span className="message-time">
-                      {message.isPending ? 'Sending...' : 
-                       message.isFailed ? 'Failed to send - tap to retry' : 
-                       format(new Date(message.timestamp), 'h:mm a')}
-                    </span>
-                    
-                    {message.isMine && !message.isPending && !message.isFailed && (
-                      <button 
-                        className="delete-message-btn" 
-                        onClick={() => handleDeleteMessage(message.id)}
-                        title="Delete message"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
-                    
-                    {message.isFailed && (
-                      <button 
-                        className="retry-btn"
-                        onClick={() => handleRetryMessage(message.content, message.id)}
-                        title="Retry sending"
-                      >
-                        <RefreshCw size={14} />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-              
-              <form className="message-input-container" onSubmit={handleSendMessage}>
-                <div className="message-attachments">
-                  <button type="button" className="attachment-button">
-                    <Image size={20} />
-                  </button>
-                  <button type="button" className="attachment-button">
-                    <Paperclip size={20} />
-                  </button>
-                  <button type="button" className="attachment-button">
-                    <Smile size={20} />
-                  </button>
-                </div>
-                <div className="message-input-wrapper">
-                  <textarea
-                    value={newMessage}
-                    onChange={(e) => setNewMessage(e.target.value)}
-                    placeholder={`Message ${activeChat.username}`}
-                    rows={1}
-                    className="message-input"
-                  />
-                  <button 
-                    type="submit" 
-                    className="send-button"
-                    disabled={!newMessage.trim()}
-                  >
-                    <Send size={20} />
-                  </button>
-                </div>
-              </form>
-            </>
           )}
         </div>
+      </div>
+      
+      <div className="messages-content">
+        {activeChat ? (
+          <>
+            <div className="chat-header">
+              <button className="back-button" onClick={() => setActiveChat(null)}>
+                <ArrowLeft size={20} />
+              </button>
+              <div className="chat-user-info" onClick={() => navigate(`/profile/${activeChat.username}`)}>
+                <div className="chat-avatar">
+                  {activeChat.username[0].toUpperCase()}
+                </div>
+                <div>
+                  <h3>{activeChat.username}</h3>
+                  <span className="user-status">
+                    {activeChat.isOnline ? 'Online' : 'Offline'}
+                  </span>
+                </div>
+              </div>
+              <div className="chat-actions">
+                <button className="refresh-btn" onClick={() => fetchMessages(activeChat)}>
+                  <RefreshCw size={18} />
+                </button>
+                <button className="delete-chat-btn" onClick={() => handleDeleteConversation(activeChat)}>
+                  <Trash2 size={18} />
+                </button>
+              </div>
+            </div>
+            
+            <div className="messages-list" ref={messagesEndRef}>
+              {messages.length === 0 ? (
+                <div className="no-messages">
+                  <p>No messages yet. Start a conversation!</p>
+                </div>
+              ) : (
+                messages.map((message, index) => {
+                  const isSender = message.sender === currentUser?.walletAddress;
+                  const showDate = index === 0 || 
+                    new Date(message.timestamp).toDateString() !== 
+                    new Date(messages[index - 1].timestamp).toDateString();
+                    
+                  return (
+                    <React.Fragment key={message.id}>
+                      {showDate && (
+                        <div className="message-date-divider">
+                          <span>{formatMessageDate(message.timestamp)}</span>
+                        </div>
+                      )}
+                      <div 
+                        className={`message-bubble ${isSender ? 'sent' : 'received'}`}
+                      >
+                        <div className="message-content">
+                          {message.content}
+                          {message.media && (
+                            <div className="message-media">
+                              <img src={message.media} alt="Media" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="message-meta">
+                          <span className="message-time">
+                            {format(new Date(message.timestamp), 'h:mm a')}
+                          </span>
+                          {isSender && (
+                            <span className="message-status">
+                              {message.read ? 'Read' : 'Sent'}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </React.Fragment>
+                  );
+                })
+              )}
+            </div>
+            
+            <div className="message-input-container">
+              <button className="attachment-btn">
+                <Paperclip size={20} />
+              </button>
+              <input 
+                type="text" 
+                placeholder="Type a message..." 
+                value={newMessage}
+                onChange={(e) => setNewMessage(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                className="message-input"
+              />
+              <button className="emoji-btn">
+                <Smile size={20} />
+              </button>
+              <button 
+                className="send-btn"
+                onClick={handleSendMessage}
+                disabled={!newMessage.trim()}
+              >
+                <Send size={20} />
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="no-chat-selected">
+            <MessageSquare size={60} />
+            <h2>Your Messages</h2>
+            <p>Select a conversation or start a new one</p>
+            <button 
+              className="new-conversation-btn"
+              onClick={() => navigate('/search?action=message')}
+            >
+              New Message
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
 };
 
-export default MessagesPage; 
+export default MessagesPage;

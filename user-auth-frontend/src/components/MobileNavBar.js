@@ -2,7 +2,7 @@ import React from 'react';
 import { Home, Search, Bell, User, MessageSquare } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { notificationService } from '../services/notificationService';
-import { messageService } from '../services/messageService';
+import messageService from '../services/messageService';
 import './MobileNavBar.css';
 
 const MobileNavBar = () => {

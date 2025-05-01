@@ -25,10 +25,28 @@ const parseMultipartForm = (event) => {
 };
 
 exports.handler = async (event, context) => {
+  // Add CORS headers for preflight requests
+  if (event.httpMethod === 'OPTIONS') {
+    return {
+      statusCode: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS'
+      },
+      body: ''
+    };
+  }
+
   // Only allow POST requests
   if (event.httpMethod !== 'POST') {
     return {
       statusCode: 405,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS'
+      },
       body: JSON.stringify({ error: 'Method not allowed' }),
     };
   }
@@ -40,6 +58,11 @@ exports.handler = async (event, context) => {
     if (error) {
       return {
         statusCode: 400,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': 'Content-Type',
+          'Access-Control-Allow-Methods': 'POST, OPTIONS'
+        },
         body: JSON.stringify({ error: 'Failed to parse form data' }),
       };
     }
@@ -76,17 +99,37 @@ exports.handler = async (event, context) => {
     else {
       return {
         statusCode: 400,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': 'Content-Type',
+          'Access-Control-Allow-Methods': 'POST, OPTIONS'
+        },
         body: JSON.stringify({ error: 'No file or JSON data provided' }),
       };
     }
 
-    // Return success response with IPFS hash (CID)
+    // List of CORS-friendly IPFS gateways
+    const corsGateways = [
+      'https://ipfs.io/ipfs',
+      'https://cloudflare-ipfs.com/ipfs',
+      'https://dweb.link/ipfs',
+      'https://ipfs.fleek.co/ipfs',
+      'https://gateway.pinata.cloud/ipfs'
+    ];
+
+    // Return success response with IPFS hash (CID) and multiple gateway URLs
     return {
       statusCode: 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS'
+      },
       body: JSON.stringify({ 
         success: true, 
         ipfsHash: result.IpfsHash,
-        gatewayUrl: `https://gateway.pinata.cloud/ipfs/${result.IpfsHash}`
+        gatewayUrl: `https://gateway.pinata.cloud/ipfs/${result.IpfsHash}`,
+        gatewayUrls: corsGateways.map(gateway => `${gateway}/${result.IpfsHash}`)
       }),
     };
   } catch (error) {
@@ -95,6 +138,11 @@ exports.handler = async (event, context) => {
     // Return error response
     return {
       statusCode: 500,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS'
+      },
       body: JSON.stringify({ 
         error: 'Failed to upload to IPFS',
         details: error.message

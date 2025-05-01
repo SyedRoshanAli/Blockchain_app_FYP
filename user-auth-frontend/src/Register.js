@@ -428,6 +428,14 @@ const Register = () => {
             // Clear any stale localStorage data for this username
             cleanupUserData(formData.username);
 
+            // Set flag in sessionStorage to indicate coming from registration
+            sessionStorage.setItem('fromRegistration', 'true');
+            
+            // Redirect to login page after a short delay
+            setTimeout(() => {
+                navigate("/login");
+            }, 1500);
+
         } catch (error) {
             console.error("Registration failed:", error);
             toast.error(error.message);

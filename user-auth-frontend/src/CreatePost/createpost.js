@@ -115,8 +115,26 @@ const CreatePost = () => {
       
       // Upload media files if any
       if (mediaFiles.length > 0) {
-        const mediaResults = await uploadFilesToIPFS(mediaFiles);
-        postData.media = mediaResults;
+        try {
+          console.log("Uploading media files to IPFS:", mediaFiles);
+          const mediaResults = await uploadFilesToIPFS(mediaFiles);
+          console.log("Media upload results:", mediaResults);
+          
+          // Ensure media results are properly formatted
+          postData.media = mediaResults.map(result => ({
+            hash: result.hash,
+            name: result.name,
+            type: result.type,
+            size: result.size
+          }));
+          
+          // Also store preview URLs for local testing
+          postData.mediaPreviews = mediaPreviews.map(preview => preview.url);
+        } catch (error) {
+          console.error("Error uploading media:", error);
+          toast.error("Error uploading media. Post will be created without media.");
+          postData.media = [];
+        }
       }
       
       // Convert post data to JSON string and upload to IPFS
